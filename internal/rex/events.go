@@ -196,6 +196,13 @@ func ParseEvent(line []byte) (event Event, ok bool, err error) {
 // a session it also receives that session's block events. Stream returns when
 // the command ends or ctx is canceled.
 func (c *Client) Stream(ctx context.Context, sessionID string, handle func(Event)) error {
+	return c.StreamWithStart(ctx, sessionID, nil, handle)
+}
+
+// StreamWithStart is Stream with a started callback. started runs once the
+// `rex events` process has actually started, so callers never report a stream
+// as connected before it exists. A nil started is allowed.
+func (c *Client) StreamWithStart(ctx context.Context, sessionID string, started func(), handle func(Event)) error {
 	if handle == nil {
 		return errors.New("rex event handler is nil")
 	}
@@ -216,6 +223,9 @@ func (c *Client) Stream(ctx context.Context, sessionID string, handle func(Event
 			return fmt.Errorf("rex binary %q was not found", c.bin())
 		}
 		return fmt.Errorf("start rex events: %w", err)
+	}
+	if started != nil {
+		started()
 	}
 
 	scanner := bufio.NewScanner(stdout)

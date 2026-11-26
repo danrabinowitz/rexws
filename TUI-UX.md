@@ -1,7 +1,7 @@
 # rexws TUI UX spec
 
-Status: **v2 — approved and implemented in Milestone 4.**
-The implementation lives in `internal/tui`.
+Status: **v3 — approved and implemented (Milestone 4 plus the TUI reliability
+pass).** The implementation lives in `internal/tui`.
 
 Related: `SPEC.md` (product design), `ROADMAP.md` (milestones).
 
@@ -80,10 +80,24 @@ TUI can stay thin and testable.
 | Window | `window_id` | Labels are display strings and may collide |
 
 Detached worktrees can share a short SHA and therefore a `SessionName`. The TUI
-keys rows by `Path`; it does not pretend the session labels are unique. If two
-workstreams resolve to the same live Rex session, show a persistent warning
-banner and do not invent a disambiguation. A future adoption/label feature can
-resolve it.
+keys rows by `Path`; it does not pretend the session labels are unique.
+
+Ambiguity is detected in both directions, against all live Rex sessions:
+
+- **Two or more workstreams to one live session.** Every affected workstream
+  row gets `!`, and the banner shows
+  `! ambiguous: N workstreams, one live session`.
+- **Two or more live sessions to one label.** Only the workstream bound to the
+  first session with that label gets `!`, and the banner shows
+  `! ambiguous: N live sessions, one label`.
+
+The TUI never invents a winner: it does not blank, reorder, or suffix a row. A
+live event for a session ID bound to several workstreams updates every one of
+them. An unbound duplicate session is not bound or streamed; it is reported as
+a warning instead. Resolution is future session adoption.
+
+`!` is a condition, not a message: it persists until the next load stops
+reporting the ambiguity.
 
 ### 3.2 Parent row
 
@@ -93,7 +107,8 @@ Shows, left to right:
 - Expand chevron (`▸` collapsed, `▾` expanded) when the workstream has windows.
 - Project name.
 - Branch (flexible width; truncated with `…`).
-- Aggregate agent badge (option A formatter) over all agents.
+- Aggregate agent badge (option A formatter) over all agents. Row markers
+  (`!`, `‖`, `!‖`) sit at the start of the badge cell (see §10).
 - Window count when `Windows` is non-empty:
   - No filter: `N tabs` / `1 tab`.
   - Filter, parent match (all children visible): `N tabs`.
@@ -139,11 +154,12 @@ session active-window value; it is not a per-client focus concept.
 
 ### 3.5 Header summary
 
-The header shows:
+The header is one line, in this order:
 
-- `REXWS`.
-- Active filter chip: `filter: <query> ×`.
-- Counts: `<N> workstreams · <M> live · <K> agent-blocked`.
+1. `REXWS`.
+2. Active filter chip: `filter: <query> ×`.
+3. One health token (global, never filter-scoped, never truncated).
+4. Counts chip: `<N> workstreams · <M> live · <K> agent-blocked`.
 
 Counts are over the **visible** set when a filter is active, and over the full
 set otherwise. The filter chip makes this clear.
@@ -153,8 +169,22 @@ set otherwise. The filter chip makes this clear.
 - **agent-blocked:** workstreams whose aggregate agent state is `blocked`.
   Workflow status is not included here; the group header carries it.
 
-At narrow widths, abbreviate `workstreams` to `ws` and drop the agent-blocked
-count first (see §4.3).
+Health token precedence (first match wins):
+
+| Condition | Token |
+| --- | --- |
+| Rex down after data was loaded | `Rex unavailable; paused (r)` |
+| Rex down, never loaded | `Rex unavailable (r)` |
+| Every live session stream down | `live paused (r)` |
+| Some live session streams down | `N streams paused (r)` / `1 stream paused (r)` |
+
+The health token reports stream health, not filter results, and it is never
+abbreviated or cut. Conditions persist; they are not transient messages.
+
+Counts are a **whole chip or absent**: full at 80+ columns, narrow (`ws`, no
+agent-blocked) below 80, and omitted when they do not fit. When a health token
+is present the filter query is capped at 12 cells at every width. Overflow is
+sacrificed in this order: counts, then query width; never health.
 
 If no workstreams exist, show the header and:
 `No workstreams. Register a repository with: rexws project add <path>`.
@@ -214,15 +244,20 @@ If no workstreams exist, show the header and:
 - Never use a split-pane layout.
 - At 60–79 columns:
   - Header uses `ws` and drops the agent-blocked count.
+  - Counts are whole or absent; never cut mid-chip.
   - Truncate the filter query to 12 cells; keep the chip.
+  - A health token is always shown in full; it is never truncated.
   - Hide the window count on parent rows.
   - Hide the app name on child rows before truncating the window label.
   - Limit the parent badge to 18 cells; limit the child badge to 18 cells.
   - Project max 10 cells; branch keeps at least 10; window label at least 12.
 - At 80+ columns:
-  - Full header counts.
+  - Full header counts, still whole or absent.
+  - The filter query is capped at 12 cells whenever a health token is present.
   - Parent badge max 28 cells; project max 12; branch flex.
   - Show window counts and app names.
+- Overflow is sacrificed in the header in this order: counts, then query width;
+  the health token is never sacrificed.
 - Never wrap a row. Use `…` and `lipgloss.Width` on sanitized text.
 - Footer priority: `Enter`, expand/back, filter, help. Add
   `s`/`n`/`d`/`r`/`q` only when they fit.
@@ -518,10 +553,23 @@ if it is pure and tested.
 
 ### 7.4 Error banner
 
-- Non-modal status line above the footer. It never captures navigation keys.
-- `x` dismisses it; it auto-dismisses after 8 seconds. `Esc` is not used to
-  dismiss it.
-- Show the newest error; if others are pending, indicate `+N more`.
+- Non-modal, one line above the footer. It never captures navigation keys.
+- **Conditions persist** (Rex state, stream health, ambiguity, project
+  discovery, an unreadable session). **Messages expire** (action errors, after
+  8 seconds).
+- Single precedence: newest unexpired transient error, then ambiguity, then
+  project discovery, then session unreadable; within a class, newest first.
+- Persistent warnings prefix `!`; transient action errors do not. Examples:
+  `! project <name>: <reason>`, `! session "<label>": <reason>`, and the
+  transient `switch: app client not connected`.
+- `+N more` is always reserved before truncation and counts every other active
+  notice.
+- `x` dismisses **only the newest transient error**. It never dismisses a
+  persistent warning. Persistent warnings clear when a later load stops
+  reporting them.
+- `?` lists every active persistent warning in full, wrapped, plus the row
+  marker legend and the `x` binding.
+- Stream connect/disconnect churn never enters the banner.
 - Errors never crash the TUI.
 
 ## 8. Live updates
@@ -534,30 +582,69 @@ Streams:
 - One per-session `rex events -s <session> --json` stream for program status,
   `session_view_changed`, and `active_window_changed`, for each live session.
 - Start/stop per-session streams as sessions appear and disappear.
-- Reconnect with exponential backoff (1s, 2s, 4s, up to 30s). Show `live updates
-  paused` in the header/footer; `r` reconnects immediately.
-- Do not let a slow handler block the event scanner. Send events to a buffered
-  channel and coalesce updates.
+- Deliver events through a bounded, coalesced queue so a slow model never
+  blocks the event scanner. Duplicate program-status or window events for the
+  same target replace their queued predecessor.
+- Preserve filter, expansion snapshot, and cursor by stable key across updates.
+
+Stream health:
+
+- Report a stream connected **only after its process actually started and
+  stayed up through a short grace period**. A stream that fails immediately is
+  never briefly healthy. A started process counts as an in-progress reconnect:
+  it cancels a pending pause debounce but does not clear an already-visible
+  pause.
+- Failure retries back off 1s, 2s, 4s, and so on up to 30s. A successful connect
+  resets the backoff to 1s, so the next failure retries in 1s.
+- Track health per live session. The server-wide lifecycle stream does not
+  decide `live paused`, and a healthy server-wide stream never sets it. It does
+  act as an availability probe: a drop schedules one debounced availability
+  load, and a reconnect marks Rex available and schedules one debounced reload
+  to reconcile anything that happened while it was down. Probes are
+  rate-limited (about one load per 5s), and a connect shortly after a healthy
+  load does not cause a second load.
+- A visible per-session pause is debounced by 2 seconds from the first drop:
+  failing attempts re-arm the same absolute deadline rather than restarting it,
+  so repeated retries cannot delay the marker. A real connect clears the pause
+  immediately, and a retry attempt alone never clears it. A reconnecting
+  process cancels a pending tick but keeps an already-visible pause.
+- Each hub restart is a new stream generation: queued messages from the old
+  generation are dropped, and health is re-learned from scratch.
+- Stream connect/disconnect churn never adds a notice and never changes the
+  notice count.
+
+Header health (see §3.5) is the only global health display:
+
+- Rex down after data was loaded: `Rex unavailable; paused (r)`.
+- Rex down, never loaded: `Rex unavailable (r)`.
+- Every live session stream down: `live paused (r)`.
+- Some down: `N streams paused (r)` / `1 stream paused (r)`.
+
+While any of these is shown, per-row `‖` markers are suppressed; `!` markers
+stay.
+
+Ambiguity is computed on every load from all live session labels against the
+workstreams' `SessionName`s, covering both directions in §3.1. Workstreams keep
+binding to the first session with their label; the UI only warns.
 
 Handling:
 
-- `program_status_changed`: update the matching agent in place; recompute the
-  workstream and window badges; no full re-list.
-- `program_status_removed`: refresh that session's agents.
+- `program_status_changed`: update the matching agent in place in **every**
+  workstream bound to that session; recompute the badges; no full re-list.
+- `program_status_removed`: refresh that session's agents (all bound rows).
 - `session_view_changed` / `active_window_changed`: refresh that session's
-  windows (labels, counts, active marker).
+  windows (all bound rows: labels, counts, active marker).
 - Session created/destroyed: refresh sessions and workstreams, update streams.
 - Debounce window/session refreshes to about 200 ms per session.
-- Preserve filter, expansion snapshot, and cursor by stable key.
 - If the selected row disappears, apply the cursor rule.
 - Do not reorder workstreams or sessions automatically.
 - Auto-expand only after `Enter` creates a session for a stopped workstream.
 
 If Rex becomes unavailable after data was loaded:
 
-- Keep the last-known rows and badges, but mark the header `Rex unavailable; live
-  updates paused`.
-- Do not reinterpret existing live rows as `stopped`.
+- Keep the last-known rows and badges; header shows `Rex unavailable; paused
+  (r)`.
+- Do not reinterpret existing live rows as `stopped`; do not show `‖`.
 - Disable create/select (`Enter`) and remove (`d`), since they depend on Rex.
 - `s` (state only) and `n` (worktree creation) remain available.
 - `r` retries; when Rex returns, refresh and resume streams.
@@ -568,14 +655,17 @@ If Rex becomes unavailable after data was loaded:
   remediation (`fix config.json` / `state.json`; `rexws list`), `r` to retry, `q`
   to quit. Do not start the dashboard.
 - **Per-project discovery error:** use `ops.Discover`'s per-project results. Skip
-  the failed project, keep the rest usable, and show a persistent warning banner
-  naming the project and error. `r` retries.
+  the failed project, keep the rest usable, and show a persistent warning
+  `! project <name>: <reason>`. `r` retries.
 - **Rex unavailable at startup:** render workstreams with `?` agent badges and no
-  windows; header banner `Rex unavailable`; disable create/select and remove; `r`
-  retries.
+  windows; header token `Rex unavailable (r)`; disable create/select and remove;
+  `r` retries.
 - **No projects:** show the empty-state message.
 - **Per-session unreadable:** use the existing `unknown` agent state and show a
-  warning; do not fail the whole dashboard.
+  persistent warning `! session "<label>": <reason>`; do not fail the whole
+  dashboard.
+- Persistent warnings never expire. `?` lists them in full; `x` does not
+  dismiss them.
 - **Status/state mismatch:** `LoadState` already rejects statuses not in config;
   surface the error in the full-screen config/state error path.
 
@@ -589,6 +679,21 @@ If Rex becomes unavailable after data was loaded:
 - Agent badges are text-only in v1: use the option-A formatter for parents and
   per-window summaries for children. Do not claim symbols that are not
   implemented.
+- Row markers are text-only, one cell each, at the start of the agent-badge
+  cell on the **parent workstream row**. Truncation keeps the prefix.
+
+  | Marker | Meaning |
+  | --- | --- |
+  | `!` | ambiguous session binding (§3.1) |
+  | `‖` | live updates paused for this session |
+  | `!‖` | both |
+
+  Windows inherit the pause and are not individually marked. `‖` is suppressed
+  while the header reports Rex down or every live stream paused; `!` always
+  shows.
+- The header has one global health token, never filter-scoped and never
+  truncated, plus a counts chip that is whole or absent (§3.5).
+- The banner is a single line; persistent warnings start with `!`.
 - Selection: `>` plus bold/accent, not color alone.
 - Expand state: `▸`/`▾`; context parent: `↳`; active window: `*` plus bold.
 - Group header: `▌` static marker.
@@ -597,7 +702,10 @@ If Rex becomes unavailable after data was loaded:
 - Truncate with `…`; never wrap.
 - `NO_COLOR` and monochrome terminals remain usable.
 - The footer is always visible and mode-specific.
-- Help is a scrollable overlay; it must fit at 18 rows.
+- Help is a scrollable overlay; it must fit at 18 rows. It lists active
+  persistent warnings in full (wrapped), including each warning's detail lines
+  (for example, the affected sessions or duplicated labels), then the marker
+  legend, the `x` binding, and the key map.
 - Minimum size 60×18; smaller shows a centered `terminal too small` message.
 
 ## 11. Technical architecture
@@ -668,9 +776,43 @@ If Rex becomes unavailable after data was loaded:
 - [ ] `PgUp`/`PgDn` move the selection, and the cursor is always visible.
 - [ ] If the selected row disappears, selection moves by the defined algorithm;
   with no selection, row actions are no-ops.
+- [ ] A per-session disconnect shows `‖` on that row and `N streams paused (r)`
+  in the header within 2s. A drop and reconnect under 2s produces no visible
+  change. A healthy server-wide stream never sets `live paused`.
+- [ ] A stream that fails every retry never flashes healthy; after a successful
+  connect, the next failure retries in 1s.
+- [ ] Rex loaded then unavailable shows `Rex unavailable; paused (r)`, keeps
+  last-known badges, shows no `‖`, and refuses `Enter`/`d`. Rex that never
+  loaded shows `Rex unavailable (r)` and `?` badges.
+- [ ] When every live session stream is down the header shows `live paused (r)`
+  and no `‖` markers remain.
+- [ ] Two workstreams sharing one session get `!` and the persistent
+  `! ambiguous: N workstreams, one live session` banner; a live event updates
+  both rows.
+- [ ] Two live sessions sharing one label get the second banner copy and `!`
+  only on the bound row.
+- [ ] With a transient error and two persistent warnings, the banner shows the
+  transient with `+2 more`; `x` reveals the highest-priority warning and never
+  dismisses a persistent one; `?` lists every persistent warning in full.
+- [ ] Stream failures add no transient notice and do not change the notice
+  count.
+- [ ] At 60 columns the worst-case header (long health token plus a capped
+  filter query) is at most 60 cells, never truncates health, and keeps counts
+  whole or absent.
+- [ ] Long banner messages at 60 columns always retain `+N more` and every line
+  stays within 60 cells.
+- [ ] The rendered screen is exactly the terminal height before and after a
+  notice expires.
+- [ ] Under ASCII/`NO_COLOR`, `!` and `‖` carry their meaning with no color or
+  ANSI escapes.
+- [ ] Control characters in labels, warnings, or errors cannot reach the
+  banner, header, or help, and cannot inject markers.
+- [ ] No new keybindings, no mouse, unchanged footer priority, unchanged 60×18
+  minimum, no wrapped rows.
 - [ ] Unit tests cover visibility, sticky expansion, match spans, the key
-  reducer, the cursor algorithm, sanitization, per-window badges, and rendering
-  at 60/80 columns.
+  reducer, the cursor algorithm, sanitization, per-window badges, rendering at
+  60/80 columns, stream health and backoff, ambiguity in both directions, and
+  banner/notice precedence.
 
 ## 13. Resolved decisions
 
@@ -692,6 +834,13 @@ If Rex becomes unavailable after data was loaded:
 - Status colors/icons are deferred.
 - Fuzzy search is deferred.
 - Minimum size is 60×18.
+- Ambiguity is warned in both directions; the first session with a label stays
+  bound and no row is invented or reordered.
+- One global health token leads the header, before counts and after the filter
+  chip; health is never truncated.
+- Row markers are text-only, inside the badge cell: `!`, `‖`, `!‖`.
+- Conditions persist; messages expire. `x` dismisses only transient errors.
+- Per-session stream pause is debounced 2s and cleared by a real connect.
 
 ## 14. Docs updates after sign-off
 

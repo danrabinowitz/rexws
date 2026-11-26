@@ -283,19 +283,24 @@ func TestStreamHubDeliversServerAndSessionEvents(t *testing.T) {
 	seenSession := false
 	for !seenServer || !seenSession {
 		select {
-		case msg := <-hub.events:
-			event, ok := msg.(streamEventMsg)
-			if !ok {
-				continue
-			}
-			switch {
-			case event.event.Type == rex.EventSessionCreated && event.event.SessionID == "session:fake":
-				seenServer = true
-			case event.event.Type == rex.EventActiveWindowChanged && event.event.SessionID == "session:fake":
-				seenSession = true
-			}
 		case <-deadline:
 			t.Fatalf("timed out: server=%v session=%v", seenServer, seenSession)
+		default:
+		}
+		msg, ok := hub.pop()
+		if !ok {
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+		event, ok := msg.(streamEventMsg)
+		if !ok {
+			continue
+		}
+		switch {
+		case event.event.Type == rex.EventSessionCreated && event.event.SessionID == "session:fake":
+			seenServer = true
+		case event.event.Type == rex.EventActiveWindowChanged && event.event.SessionID == "session:fake":
+			seenSession = true
 		}
 	}
 }

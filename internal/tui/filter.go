@@ -107,7 +107,7 @@ func BuildRows(opts BuildOptions) BuildResult {
 			if item.ws.AgentState == core.AgentBlocked {
 				result.Blocked++
 			}
-			row := workstreamRow(item.ws, item.parentMatch, item.context, item.expanded, len(item.windowIdxs), active, opts.BadgeUnknown, query)
+			row := workstreamRow(item.ws, item.parentMatch, item.context, item.expanded, len(item.windowIdxs), active, opts, query)
 			result.Rows = append(result.Rows, row)
 			if !item.expanded || len(item.ws.Windows) == 0 {
 				continue
@@ -123,13 +123,26 @@ func BuildRows(opts BuildOptions) BuildResult {
 	return result
 }
 
-func workstreamRow(ws core.Workstream, parentMatch, context, expanded bool, visibleWindows int, active, badgeUnknown bool, query string) Row {
+func workstreamRow(ws core.Workstream, parentMatch, context, expanded bool, visibleWindows int, active bool, opts BuildOptions, query string) Row {
 	project := render.Sanitize(ws.Project)
 	branch := render.Sanitize(ws.Branch)
 	badge := render.Sanitize(render.Default.Format(ws))
-	if badgeUnknown {
+	if opts.BadgeUnknown {
 		badge = "?"
 	}
+	// Markers sit inside the badge cell so truncation keeps the prefix. The
+	// parent row carries them; windows inherit the pause without a marker.
+	ambiguous := ws.RexSessionID != "" &&
+		(opts.AmbiguousSessions[ws.RexSessionID] || opts.AmbiguousLabels[ws.SessionName])
+	paused := !opts.SuppressPauseMarker && ws.RexSessionID != "" && opts.PausedSessions[ws.RexSessionID]
+	marker := ""
+	if ambiguous {
+		marker += "!"
+	}
+	if paused {
+		marker += "‖"
+	}
+	badge = marker + badge
 	row := Row{
 		Kind:         RowWorkstream,
 		Key:          RowKey{Kind: RowWorkstream, ID: ws.Path},

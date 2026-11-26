@@ -86,51 +86,70 @@ func renderFatal(s State, width, height int) string {
 	return content
 }
 
+// renderHeader draws: brand, filter chip, health token, counts. The health
+// token is global and never truncated; counts are a whole chip or absent.
 func renderHeader(s State, width int) string {
-	parts := []string{titleStyle.Render("REXWS")}
-	if s.query != "" {
-		query := s.query
-		if width < 80 {
-			query = truncate(query, 12)
+	limit := width - 1 // one leading space
+	brand := titleStyle.Render("REXWS")
+	health := s.healthToken()
+	sep := "  "
+
+	// The query is capped at 12 cells when narrow or when a health token is
+	// present; otherwise it may use what fits.
+	query := render.Sanitize(s.query)
+	if query != "" && (width < 80 || health != "") {
+		query = truncate(query, 12)
+	}
+	if query != "" {
+		chipFixed := lipgloss.Width("filter: ") + lipgloss.Width(" ×")
+		available := limit - lipgloss.Width(brand) - lipgloss.Width(sep) - chipFixed
+		if health != "" {
+			available -= lipgloss.Width(sep) + lipgloss.Width(health)
 		}
-		parts = append(parts, "filter: "+query+" ×")
+		if available < lipgloss.Width(query) {
+			query = truncate(query, available)
+		}
+	}
+
+	line := brand
+	if query != "" {
+		line += sep + "filter: " + query + " ×"
+	}
+	if health != "" {
+		line += sep + health
 	}
 	if s.haveConfig {
-		switch {
-		case !s.rexAvailable && s.rexEverLoaded:
-			parts = append(parts, "Rex unavailable; live updates paused")
-		case !s.rexAvailable:
-			parts = append(parts, "Rex unavailable")
-		case s.streamsPaused:
-			parts = append(parts, "live updates paused")
+		if counts := countsChip(s, width); counts != "" &&
+			lipgloss.Width(line)+lipgloss.Width(sep)+lipgloss.Width(counts) <= limit {
+			line += sep + counts
 		}
 	}
-	if s.haveConfig {
-		if width >= 80 {
-			parts = append(parts, fmt.Sprintf("[%d workstreams · %d live · %d agent-blocked]",
-				s.build.Workstreams, s.build.Live, s.build.Blocked))
-		} else {
-			parts = append(parts, fmt.Sprintf("[%d ws · %d live]", s.build.Workstreams, s.build.Live))
-		}
+	return fitWidth(" "+line, width)
+}
+
+func countsChip(s State, width int) string {
+	if width >= 80 {
+		return fmt.Sprintf("[%d workstreams · %d live · %d agent-blocked]",
+			s.build.Workstreams, s.build.Live, s.build.Blocked)
 	}
-	return fitWidth(" "+strings.Join(parts, "  "), width)
+	return fmt.Sprintf("[%d ws · %d live]", s.build.Workstreams, s.build.Live)
 }
 
 func renderNotice(s State, width int) (string, bool) {
-	visible := make([]notice, 0, len(s.notices))
-	for _, n := range s.notices {
-		if n.persistent || n.expires.After(time.Now()) {
-			visible = append(visible, n)
-		}
-	}
-	if len(visible) == 0 {
+	shown, more, ok := s.bannerNotice(time.Now())
+	if !ok {
 		return "", false
 	}
-	newest := visible[len(visible)-1]
-	text := " " + render.Sanitize(newest.text)
-	if len(visible) > 1 {
-		text += fmt.Sprintf("  +%d more", len(visible)-1)
+	suffix := ""
+	if more > 0 {
+		suffix = fmt.Sprintf("  +%d more", more)
 	}
+	available := width - lipgloss.Width(suffix)
+	text := " " + render.Sanitize(shown.text)
+	if available < 1 {
+		available = 1
+	}
+	text = truncate(text, available) + suffix
 	return noticeStyle.Render(truncate(text, width)), true
 }
 
@@ -153,7 +172,7 @@ func renderBody(s State, width, height int) string {
 	}
 	if len(s.rows) == 0 {
 		if s.query != "" {
-			return centerLine(fmt.Sprintf("No matches for %q. Press Esc to clear.", s.query), width, height)
+			return centerLine(fmt.Sprintf("No matches for %q. Press Esc to clear.", render.Sanitize(s.query)), width, height)
 		}
 		return centerLine("No workstreams.", width, height)
 	}
@@ -660,8 +679,39 @@ func renderHelp(s State, width, height int) string {
 	h := help.New()
 	h.Width = width
 	h.ShowAll = true
-	content := h.View(helpKeys{})
-	lines := strings.Split(content, "\n")
+	keyLines := strings.Split(h.View(helpKeys{}), "\n")
+
+	lines := make([]string, 0, len(keyLines)+16)
+	persistent := s.persistentNotices(time.Now())
+	if len(persistent) > 0 {
+		lines = append(lines, " Warnings")
+		for _, n := range persistent {
+			for _, line := range wrapText(render.Sanitize(n.text), width-1) {
+				lines = append(lines, " "+line)
+			}
+			if n.detail != "" {
+				for _, line := range wrapText(render.Sanitize(n.detail), width-3) {
+					lines = append(lines, "   "+line)
+				}
+			}
+		}
+		lines = append(lines, "")
+	}
+	lines = append(lines,
+		" Markers",
+		" !   ambiguous session binding",
+		" ‖   live updates paused for this session",
+		" !‖  both",
+		" x   dismiss the newest action error",
+		"",
+	)
+	lines = append(lines, keyLines...)
+
+	for i := range lines {
+		lines[i] = fitWidth(lines[i], width)
+	}
+	content := strings.Join(lines, "\n")
+
 	top := s.helpOffset
 	if maxTop := max(0, len(lines)-height); top > maxTop {
 		top = maxTop
@@ -673,6 +723,42 @@ func renderHelp(s State, width, height int) string {
 	view.SetContent(content)
 	view.SetYOffset(top)
 	return view.View()
+}
+
+// wrapText breaks text into lines of at most width cells without splitting a
+// word when it can be avoided. It is used for full warning text in Help.
+func wrapText(text string, width int) []string {
+	if width < 1 {
+		return []string{""}
+	}
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return []string{""}
+	}
+	var lines []string
+	current := ""
+	for _, word := range words {
+		switch {
+		case current == "":
+			current = word
+		case lipgloss.Width(current)+1+lipgloss.Width(word) <= width:
+			current += " " + word
+		default:
+			lines = append(lines, current)
+			current = word
+		}
+		if lipgloss.Width(current) > width {
+			lines = append(lines, truncate(current, width))
+			current = ""
+		}
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	if len(lines) == 0 {
+		lines = append(lines, "")
+	}
+	return lines
 }
 
 type helpKeys struct{}
@@ -706,6 +792,7 @@ func (helpKeys) FullHelp() [][]key.Binding {
 			bind("ctrl+n/p", "move selection"),
 		},
 		{
+			bind("x", "dismiss the newest error"),
 			bind("?", "help"),
 			bind("q", "quit"),
 			bind("ctrl+c", "quit"),

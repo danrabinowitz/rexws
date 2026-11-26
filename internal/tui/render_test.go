@@ -196,8 +196,11 @@ func TestRenderOutageKeepsLastKnownBadges(t *testing.T) {
 	s.rexEverLoaded = true
 	s = s.rebuild()
 	out := Render(s)
-	if !strings.Contains(out, "Rex unavailable; live updates paused") {
+	if !strings.Contains(out, "Rex unavailable; paused (r)") {
 		t.Errorf("outage header missing:\n%s", out)
+	}
+	if strings.Contains(out, "‖") {
+		t.Errorf("outage header kept per-session pause markers:\n%s", out)
 	}
 	if !strings.Contains(out, "blocked (permission)") {
 		t.Errorf("last-known badge was lost:\n%s", out)

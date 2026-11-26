@@ -1,6 +1,9 @@
 package rex
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -172,4 +175,41 @@ func TestParseEventRejectsMalformedInput(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStreamWithStartReportsStartOnlyForAStartedProcess(t *testing.T) {
+	t.Run("missing binary", func(t *testing.T) {
+		started := false
+		err := New(filepath.Join(t.TempDir(), "missing-rex")).StreamWithStart(
+			context.Background(), "", func() { started = true }, func(Event) {})
+		if err == nil {
+			t.Fatal("missing binary produced no error")
+		}
+		if started {
+			t.Error("started fired for a missing binary")
+		}
+	})
+
+	t.Run("started process", func(t *testing.T) {
+		dir := t.TempDir()
+		bin := filepath.Join(dir, "rex")
+		script := "#!/bin/sh\nprintf '%s\\n' '" + sessionCreatedLine + "'\n"
+		if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		started := false
+		var seen []Event
+		err := New(bin).StreamWithStart(context.Background(), "", func() { started = true }, func(event Event) {
+			seen = append(seen, event)
+		})
+		if err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+		if !started {
+			t.Error("started did not fire for a started process")
+		}
+		if len(seen) != 1 || seen[0].Type != EventSessionCreated {
+			t.Errorf("events = %#v", seen)
+		}
+	})
 }

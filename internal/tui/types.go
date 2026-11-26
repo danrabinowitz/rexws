@@ -95,6 +95,15 @@ type BuildOptions struct {
 	Forced       map[string]bool
 	Query        string
 	BadgeUnknown bool
+	// PausedSessions are live session IDs whose updates are visibly paused.
+	PausedSessions map[string]bool
+	// SuppressPauseMarker hides the per-row pause marker while the header
+	// already reports the outage.
+	SuppressPauseMarker bool
+	// AmbiguousSessions are session IDs bound to more than one workstream.
+	AmbiguousSessions map[string]bool
+	// AmbiguousLabels are session labels shared by more than one live session.
+	AmbiguousLabels map[string]bool
 }
 
 // BuildResult is the derived tree plus counts over the visible workstreams.

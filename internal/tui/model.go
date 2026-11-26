@@ -13,8 +13,13 @@ import (
 	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/core"
 	"github.com/danrabinowitz/rexws/internal/ops"
+	"github.com/danrabinowitz/rexws/internal/render"
 	"github.com/danrabinowitz/rexws/internal/rex"
 )
+
+// tickFunc schedules a delayed message. It is a seam so timing tests do not
+// have to sleep.
+type tickFunc func(time.Duration, func(time.Time) tea.Msg) tea.Cmd
 
 // Model is the Bubbletea model. It owns the pure State plus the event hub.
 type Model struct {
@@ -23,12 +28,14 @@ type Model struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
 	noticeTicking bool
+	tick          tickFunc
+	now           func() time.Time
 }
 
 // NewModel returns a dashboard that loads its data on Init.
 func NewModel() *Model {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Model{state: newState(), ctx: ctx, cancel: cancel}
+	return &Model{state: newState(), ctx: ctx, cancel: cancel, tick: tea.Tick, now: time.Now}
 }
 
 // Run starts the dashboard in the alternate screen.
@@ -107,11 +114,17 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.hub == nil {
 			return m, nil
 		}
+		if m.staleStream(msg.generation) {
+			return m, waitForStream(m.hub)
+		}
 		cmd := m.handleStreamEvent(msg.event)
 		return m, batch([]tea.Cmd{cmd, waitForStream(m.hub)})
 	case streamStateMsg:
 		if m.hub == nil {
 			return m, nil
+		}
+		if m.staleStream(msg.generation) {
+			return m, waitForStream(m.hub)
 		}
 		cmd := m.handleStreamState(msg)
 		return m, batch([]tea.Cmd{cmd, waitForStream(m.hub)})
@@ -121,10 +134,20 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleSessionWindows(msg)
 	case windowRefreshTickMsg:
 		return m.handleWindowRefreshTick(msg)
+	case pauseTickMsg:
+		return m.handlePauseTick(msg)
+	case rexCheckTickMsg:
+		return m.handleRexCheckTick(msg)
 	case noticeTickMsg:
 		return m.handleNoticeTick()
 	}
 	return m, nil
+}
+
+// staleStream reports whether a message belongs to an older stream
+// generation. A zero generation means unspecified (used by tests).
+func (m *Model) staleStream(generation int) bool {
+	return generation != 0 && generation != m.state.streamGeneration
 }
 
 func (m *Model) applyEffects(e Effects) (*Model, tea.Cmd) {
@@ -135,11 +158,9 @@ func (m *Model) applyEffects(e Effects) (*Model, tea.Cmd) {
 	if e.Refresh {
 		if e.Reconnect && m.hub != nil {
 			m.hub.Reconnect()
+			m.adoptStreamGeneration()
 		}
-		if !m.state.loading {
-			m.state.loading = true
-			cmds = append(cmds, loadCmd(m.ctx))
-		}
+		cmds = append(cmds, m.refreshNow())
 	}
 	if e.Switch != nil {
 		m.state.pending = true
@@ -188,13 +209,15 @@ func batch(cmds []tea.Cmd) tea.Cmd {
 
 // loadedMsg is the result of a full config/state/Git/Rex load.
 type loadedMsg struct {
-	cfg          config.Config
-	workstreams  []core.Workstream
-	warnings     []string
-	rexAvailable bool
-	fatalKind    string
-	fatalErr     error
-	loadErr      error
+	cfg               config.Config
+	workstreams       []core.Workstream
+	sessions          []core.Session
+	discoveryWarnings []string
+	sessionWarnings   []string
+	rexAvailable      bool
+	fatalKind         string
+	fatalErr          error
+	loadErr           error
 }
 
 func loadCmd(ctx context.Context) tea.Cmd {
@@ -216,20 +239,22 @@ func loadCmd(ctx context.Context) tea.Cmd {
 		} else {
 			workstreams, err = core.Build(discovery.Inputs, state, nil, cfg)
 		}
-		warnings := make([]string, 0, len(discovery.Errors)+len(rexState.Warnings))
+		discoveryWarnings := make([]string, 0, len(discovery.Errors))
 		for _, projectErr := range discovery.Errors {
-			warnings = append(warnings, projectErr.Error())
+			discoveryWarnings = append(discoveryWarnings, projectErr.Error())
 		}
-		warnings = append(warnings, rexState.Warnings...)
-		if err == nil {
-			warnings = append(warnings, duplicateSessionWarnings(workstreams)...)
+		var sessions []core.Session
+		if rexState.Err == nil {
+			sessions = rexState.Sessions
 		}
 		return loadedMsg{
-			cfg:          cfg,
-			workstreams:  workstreams,
-			warnings:     warnings,
-			rexAvailable: rexState.Err == nil,
-			loadErr:      err,
+			cfg:               cfg,
+			workstreams:       workstreams,
+			sessions:          sessions,
+			discoveryWarnings: discoveryWarnings,
+			sessionWarnings:   append([]string(nil), rexState.Warnings...),
+			rexAvailable:      rexState.Err == nil,
+			loadErr:           err,
 		}
 	}
 }
@@ -240,6 +265,9 @@ func (m *Model) handleLoaded(msg loadedMsg) (*Model, tea.Cmd) {
 		m.state.fatalKind = msg.fatalKind
 		m.state.fatalErr = msg.fatalErr
 		m.state.mode = ModeFatal
+		m.state.reloadWanted = false
+		m.state.rexCheckPending = false
+		m.state.rexCheckToken++
 		if m.hub != nil {
 			m.hub.Close()
 			m.hub = nil
@@ -257,7 +285,6 @@ func (m *Model) handleLoaded(msg loadedMsg) (*Model, tea.Cmd) {
 	}
 
 	m.state.rexAvailable = msg.rexAvailable
-	m.state.streamsPaused = !msg.rexAvailable
 	if msg.loadErr != nil {
 		m.state = m.state.addError(msg.loadErr.Error())
 	} else {
@@ -271,9 +298,22 @@ func (m *Model) handleLoaded(msg loadedMsg) (*Model, tea.Cmd) {
 		}
 		if msg.rexAvailable {
 			m.state.rexEverLoaded = true
+			m.state.sessions = msg.sessions
 		}
 	}
-	m.state = m.state.setPersistentWarnings(msg.warnings)
+	ambiguity := analyzeAmbiguity(m.state.sessions, m.state.workstreams)
+	m.state.ambiguousSessions = ambiguity.sessions
+	m.state.ambiguousLabels = ambiguity.labels
+	warnings := make([]persistentWarning, 0, len(ambiguity.warnings)+len(msg.discoveryWarnings)+len(msg.sessionWarnings))
+	warnings = append(warnings, ambiguity.warnings...)
+	for _, text := range msg.discoveryWarnings {
+		warnings = append(warnings, persistentWarning{text: text, class: warningDiscovery})
+	}
+	for _, text := range msg.sessionWarnings {
+		warnings = append(warnings, persistentWarning{text: text, class: warningSession})
+	}
+	m.state = m.state.setPersistentWarnings(warnings)
+	m.state = m.state.pruneStreamState()
 	m.state = m.state.rebuild()
 
 	var cmds []tea.Cmd
@@ -289,7 +329,33 @@ func (m *Model) handleLoaded(msg loadedMsg) (*Model, tea.Cmd) {
 	} else {
 		m.hub.SyncSessions(nil)
 	}
+	m.adoptStreamGeneration()
+	m.state.lastLoadAt = m.now()
+	m.state.lastLoadHealthy = msg.rexAvailable && msg.loadErr == nil
+
+	// A refresh requested while this load was in flight must not be lost: the
+	// in-flight result may predate a Rex recovery.
+	if m.state.reloadWanted {
+		m.state.reloadWanted = false
+		m.state.loading = true
+		cmds = append(cmds, loadCmd(m.ctx))
+	}
 	return m, batch(cmds)
+}
+
+// adoptStreamGeneration follows a hub restart: messages from the old streams
+// are invalid, and visible stream health is re-learned from scratch.
+func (m *Model) adoptStreamGeneration() {
+	if m.hub == nil {
+		return
+	}
+	generation := m.hub.Generation()
+	if generation == m.state.streamGeneration {
+		return
+	}
+	m.state.streamGeneration = generation
+	m.state = m.state.resetStreamState()
+	m.state = m.state.rebuild()
 }
 
 func liveSessionIDs(workstreams []core.Workstream) []string {
@@ -305,25 +371,110 @@ func liveSessionIDs(workstreams []core.Workstream) []string {
 	return ids
 }
 
-func duplicateSessionWarnings(workstreams []core.Workstream) []string {
-	bySession := make(map[string][]string)
-	for _, ws := range workstreams {
-		if ws.RexSessionID != "" {
-			bySession[ws.RexSessionID] = append(bySession[ws.RexSessionID], ws.Path)
-		}
-	}
-	var warnings []string
-	for sessionID, paths := range bySession {
-		if len(paths) > 1 {
-			sort.Strings(paths)
-			warnings = append(warnings, fmt.Sprintf("%d workstreams resolve to Rex session %s: %s", len(paths), sessionID, joinPaths(paths)))
-		}
-	}
-	sort.Strings(warnings)
-	return warnings
+// ambiguityAnalysis is the ambiguity condition in both directions plus its
+// persistent banner copy. Each direction produces at most one warning; Help
+// carries the full list of affected sessions or labels.
+type ambiguityAnalysis struct {
+	sessions map[string]bool // session ID bound to more than one workstream
+	labels   map[string]bool // label shared by more than one live session
+	warnings []persistentWarning
 }
 
-func joinPaths(paths []string) string { return strings.Join(paths, ", ") }
+// analyzeAmbiguity compares all live session labels with the workstreams that
+// bind to them. Workstreams keep binding to the first session with their label
+// (core.Build); this only warns.
+func analyzeAmbiguity(sessions []core.Session, workstreams []core.Workstream) ambiguityAnalysis {
+	out := ambiguityAnalysis{
+		sessions: map[string]bool{},
+		labels:   map[string]bool{},
+	}
+
+	labelByID := make(map[string]string, len(sessions))
+	for _, session := range sessions {
+		if session.ID != "" && labelByID[session.ID] == "" {
+			labelByID[session.ID] = session.Label
+		}
+	}
+
+	// Direction one: a live session bound to several workstreams.
+	bySession := make(map[string]int, len(workstreams))
+	for _, ws := range workstreams {
+		if ws.RexSessionID != "" {
+			bySession[ws.RexSessionID]++
+		}
+	}
+	type group struct {
+		key   string
+		count int
+	}
+	var shared []group
+	largest := 0
+	for sessionID, count := range bySession {
+		if count <= 1 {
+			continue
+		}
+		out.sessions[sessionID] = true
+		shared = append(shared, group{key: sessionID, count: count})
+		if count > largest {
+			largest = count
+		}
+	}
+	if largest > 0 {
+		sort.Slice(shared, func(i, j int) bool { return shared[i].key < shared[j].key })
+		details := make([]string, 0, len(shared))
+		for _, item := range shared {
+			label := render.Sanitize(labelByID[item.key])
+			if label == "" {
+				label = render.Sanitize(item.key)
+			}
+			details = append(details, fmt.Sprintf("%s (%d workstreams)", label, item.count))
+		}
+		out.warnings = append(out.warnings, persistentWarning{
+			text:   fmt.Sprintf("ambiguous: %d workstreams, one live session", largest),
+			detail: "Affected sessions: " + strings.Join(details, "; "),
+			class:  warningAmbiguity,
+		})
+	}
+
+	// Direction two: several distinct live sessions sharing one label. Duplicate
+	// listings of the same session ID are not ambiguous.
+	seenIDs := make(map[string]bool, len(sessions))
+	byLabel := make(map[string]int, len(sessions))
+	for _, session := range sessions {
+		if session.ID != "" {
+			if seenIDs[session.ID] {
+				continue
+			}
+			seenIDs[session.ID] = true
+		}
+		byLabel[session.Label]++
+	}
+	var duplicates []group
+	largest = 0
+	for label, count := range byLabel {
+		if count <= 1 {
+			continue
+		}
+		out.labels[label] = true
+		duplicates = append(duplicates, group{key: label, count: count})
+		if count > largest {
+			largest = count
+		}
+	}
+	if largest > 0 {
+		sort.Slice(duplicates, func(i, j int) bool { return duplicates[i].key < duplicates[j].key })
+		details := make([]string, 0, len(duplicates))
+		for _, item := range duplicates {
+			details = append(details, fmt.Sprintf("%s (%d live sessions)", render.Sanitize(item.key), item.count))
+		}
+		out.warnings = append(out.warnings, persistentWarning{
+			text:   fmt.Sprintf("ambiguous: %d live sessions, one label", largest),
+			detail: "Duplicate labels: " + strings.Join(details, "; "),
+			class:  warningAmbiguity,
+		})
+	}
+	return out
+}
 
 // switchDoneMsg reports a session/window switch.
 type switchDoneMsg struct {
@@ -350,10 +501,7 @@ func (m *Model) handleSwitchDone(msg switchDoneMsg) (*Model, tea.Cmd) {
 		m.state.cursorKey = RowKey{Kind: RowWorkstream, ID: msg.request.ExpandPath}
 	}
 	m.state = m.state.rebuild()
-	if !m.state.loading {
-		m.state.loading = true
-		cmds = append(cmds, loadCmd(m.ctx))
-	}
+	cmds = append(cmds, m.refreshNow())
 	return m, batch(cmds)
 }
 
@@ -381,10 +529,7 @@ func (m *Model) handleStatusDone(msg statusDoneMsg) (*Model, tea.Cmd) {
 		m.state.cursorKey = RowKey{Kind: RowWorkstream, ID: msg.request.Path}
 	}
 	m.state = m.state.rebuild()
-	if !m.state.loading {
-		m.state.loading = true
-		cmds = append(cmds, loadCmd(m.ctx))
-	}
+	cmds = append(cmds, m.refreshNow())
 	return m, batch(cmds)
 }
 
@@ -550,9 +695,11 @@ func (m *Model) handleCreateVerified(msg createVerifiedMsg) (*Model, tea.Cmd) {
 	return m, batch(cmds)
 }
 
-// refreshNow starts a data load unless one is already running.
+// refreshNow starts a data load unless one is already running. A request that
+// arrives during a load is remembered and re-issued when that load finishes.
 func (m *Model) refreshNow() tea.Cmd {
 	if m.state.loading {
+		m.state.reloadWanted = true
 		return nil
 	}
 	m.state.loading = true
@@ -583,21 +730,20 @@ func agentsRefreshCmd(ctx context.Context, cfg config.Config, sessionID, label s
 }
 
 func (m *Model) handleSessionAgents(msg sessionAgentsMsg) (*Model, tea.Cmd) {
-	index := m.sessionIndex(msg.sessionID)
-	if index < 0 {
+	indexes := m.sessionIndexes(msg.sessionID)
+	if len(indexes) == 0 {
 		return m, nil
 	}
 	if msg.err != nil {
 		m.state = m.state.addError(fmt.Sprintf("session %s: %v", msg.label, msg.err))
 		return m, nil
 	}
-	ws := m.state.workstreams[index]
-	ws.Agents = msg.agents
-	if ws.Agents == nil {
-		ws.Agents = []core.Agent{}
+	for _, index := range indexes {
+		ws := m.state.workstreams[index]
+		ws.Agents = append([]core.Agent{}, msg.agents...)
+		ws.AgentState, ws.AgentDetail = core.Summarize(ws.Agents)
+		m.state = m.state.replaceWorkstream(index, ws)
 	}
-	ws.AgentState, ws.AgentDetail = core.Summarize(ws.Agents)
-	m.state = m.state.replaceWorkstream(index, ws)
 	for _, warning := range msg.warnings {
 		m.state = m.state.addError(warning)
 	}
@@ -623,20 +769,19 @@ func windowsRefreshCmd(ctx context.Context, cfg config.Config, sessionID, label 
 }
 
 func (m *Model) handleSessionWindows(msg sessionWindowsMsg) (*Model, tea.Cmd) {
-	index := m.sessionIndex(msg.sessionID)
-	if index < 0 {
+	indexes := m.sessionIndexes(msg.sessionID)
+	if len(indexes) == 0 {
 		return m, nil
 	}
 	if msg.err != nil {
 		m.state = m.state.addError(fmt.Sprintf("session %s windows: %v", msg.label, msg.err))
 		return m, nil
 	}
-	ws := m.state.workstreams[index]
-	ws.Windows = msg.windows
-	if ws.Windows == nil {
-		ws.Windows = []core.Window{}
+	for _, index := range indexes {
+		ws := m.state.workstreams[index]
+		ws.Windows = append([]core.Window{}, msg.windows...)
+		m.state = m.state.replaceWorkstream(index, ws)
 	}
-	m.state = m.state.replaceWorkstream(index, ws)
 	return m, nil
 }
 
@@ -654,7 +799,7 @@ func (m *Model) scheduleWindowRefresh(sessionID string) tea.Cmd {
 	m.state.refreshSeq[sessionID]++
 	token := m.state.refreshSeq[sessionID]
 	m.state.refreshToken[sessionID] = token
-	return tea.Tick(200*time.Millisecond, func(time.Time) tea.Msg {
+	return m.tick(200*time.Millisecond, func(time.Time) tea.Msg {
 		return windowRefreshTickMsg{sessionID: sessionID, token: token}
 	})
 }
@@ -664,11 +809,11 @@ func (m *Model) handleWindowRefreshTick(msg windowRefreshTickMsg) (*Model, tea.C
 		return m, nil
 	}
 	m.state.refreshPending[msg.sessionID] = false
-	index := m.sessionIndex(msg.sessionID)
-	if index < 0 {
+	indexes := m.sessionIndexes(msg.sessionID)
+	if len(indexes) == 0 {
 		return m, nil
 	}
-	ws := m.state.workstreams[index]
+	ws := m.state.workstreams[indexes[0]]
 	return m, windowsRefreshCmd(m.ctx, m.state.cfg, msg.sessionID, ws.SessionName)
 }
 
@@ -685,37 +830,34 @@ func (m *Model) handleNoticeTick() (*Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) sessionIndex(sessionID string) int {
+// sessionIndexes returns every workstream bound to a Rex session ID. Two
+// workstreams can resolve to one session, so updates must reach all of them.
+func (m *Model) sessionIndexes(sessionID string) []int {
 	if sessionID == "" {
-		return -1
+		return nil
 	}
+	var indexes []int
 	for i, ws := range m.state.workstreams {
 		if ws.RexSessionID == sessionID {
-			return i
+			indexes = append(indexes, i)
 		}
 	}
-	return -1
+	return indexes
 }
 
 // handleStreamEvent applies one Rex event. It returns an optional command to
-// refresh agents or windows.
+// refresh agents or windows. Stream health changes only through
+// streamStateMsg, never an arbitrary event.
 func (m *Model) handleStreamEvent(event rex.Event) tea.Cmd {
-	wasUnavailable := !m.state.rexAvailable
-	m.state.rexAvailable = true
-	m.state.streamsPaused = false
-	if wasUnavailable {
-		return m.backgroundRefresh()
-	}
-
 	switch event.Type {
 	case rex.EventProgramStatusChanged:
 		return m.applyProgramStatus(event)
 	case rex.EventProgramStatusRemoved:
-		index := m.sessionIndex(event.SessionID)
-		if index < 0 {
+		indexes := m.sessionIndexes(event.SessionID)
+		if len(indexes) == 0 {
 			return m.backgroundRefresh()
 		}
-		ws := m.state.workstreams[index]
+		ws := m.state.workstreams[indexes[0]]
 		return agentsRefreshCmd(m.ctx, m.state.cfg, event.SessionID, ws.SessionName)
 
 	case rex.EventSessionCreated, rex.EventSessionDestroyed:
@@ -740,24 +882,32 @@ func (m *Model) applyProgramStatus(event rex.Event) tea.Cmd {
 	if event.Record == nil {
 		return nil
 	}
-	index := m.sessionIndex(event.SessionID)
-	if index < 0 {
+	indexes := m.sessionIndexes(event.SessionID)
+	if len(indexes) == 0 {
 		return m.backgroundRefresh()
 	}
-	ws := m.state.workstreams[index]
-	found := false
-	for i := range ws.Agents {
-		if ws.Agents[i].BlockID == event.BlockID {
-			applyStatusRecord(&ws.Agents[i], *event.Record)
-			found = true
-			break
+	needRefresh := false
+	for _, index := range indexes {
+		ws := m.state.workstreams[index]
+		found := false
+		for i := range ws.Agents {
+			if ws.Agents[i].BlockID == event.BlockID {
+				applyStatusRecord(&ws.Agents[i], *event.Record)
+				found = true
+				break
+			}
 		}
+		if !found {
+			needRefresh = true
+			continue
+		}
+		ws.AgentState, ws.AgentDetail = core.Summarize(ws.Agents)
+		m.state = m.state.replaceWorkstream(index, ws)
 	}
-	if !found {
+	if needRefresh {
+		ws := m.state.workstreams[indexes[0]]
 		return agentsRefreshCmd(m.ctx, m.state.cfg, event.SessionID, ws.SessionName)
 	}
-	ws.AgentState, ws.AgentDetail = core.Summarize(ws.Agents)
-	m.state = m.state.replaceWorkstream(index, ws)
 	return nil
 }
 
@@ -777,17 +927,139 @@ func applyStatusRecord(agent *core.Agent, record rex.StatusRecord) {
 }
 
 func (m *Model) handleStreamState(msg streamStateMsg) tea.Cmd {
-	if msg.sessionID != "" {
+	switch {
+	case msg.connecting:
+		// A reconnect attempt is underway. Cancel the pause debounce so a
+		// reconnect that lands inside the 2s window cannot flash a pause, but
+		// leave an already-visible pause until a real connect. The server-wide
+		// stream does not pre-empt the availability probe: only a real connect
+		// cancels it.
+		if msg.sessionID != "" {
+			m.state = m.state.markStreamConnecting(msg.sessionID)
+		}
 		return nil
-	}
-	if msg.connected {
-		m.state.streamsPaused = false
-		if !m.state.rexAvailable {
+
+	case msg.connected:
+		wasPaused := m.state.streamPaused[msg.sessionID]
+		m.state = m.state.markStreamConnected(msg.sessionID)
+		if msg.sessionID == "" {
+			// The server-wide stream is an availability probe: reconnect proves
+			// Rex is reachable, and a debounced reload reconciles anything that
+			// happened while it was down.
+			wasAvailable := m.state.rexAvailable
 			m.state.rexAvailable = true
-			return m.backgroundRefresh()
+			if !wasAvailable {
+				m.state = m.state.rebuild()
+			}
+			// A healthy load that just completed already covers this reconnect,
+			// so startup and `r` must not cause a redundant second load.
+			if m.state.lastLoadHealthy && !m.state.lastLoadAt.IsZero() &&
+				m.now().Sub(m.state.lastLoadAt) < rexCooldown {
+				return nil
+			}
+			return m.scheduleRexCheck()
+		}
+		if wasPaused {
+			m.state = m.state.rebuild()
 		}
 		return nil
 	}
-	m.state.streamsPaused = true
-	return nil
+
+	// Disconnected.
+	if msg.sessionID == "" {
+		// Probe Rex's availability once, and only while it is believed to be
+		// up. Repeated stream retries must not storm the disk.
+		if m.state.rexAvailable {
+			return m.scheduleRexCheck()
+		}
+		return nil
+	}
+	return m.schedulePauseCheck(msg.sessionID)
+}
+
+// rexCheckDelay debounces the availability probe/reconcile so a flapping
+// server-wide stream causes at most one load. rexCooldown bounds the rate
+// further: a new check is deferred, never dropped.
+const (
+	rexCheckDelay = time.Second
+	rexCooldown   = 5 * time.Second
+)
+
+type rexCheckTickMsg struct{ token int }
+
+// scheduleRexCheck schedules one debounced reload at least rexCheckDelay away
+// and no sooner than rexCooldown after the last check. A newer signal replaces
+// an older pending check, so flapping coalesces into a single load.
+func (m *Model) scheduleRexCheck() tea.Cmd {
+	now := m.now()
+	target := now.Add(rexCheckDelay)
+	if earliest := m.state.lastRexCheck.Add(rexCooldown); earliest.After(target) {
+		target = earliest
+	}
+	delay := target.Sub(now)
+	if delay < 0 {
+		delay = 0
+	}
+	m.state.rexCheckSeq++
+	token := m.state.rexCheckSeq
+	m.state.rexCheckToken = token
+	m.state.rexCheckPending = true
+	return m.tick(delay, func(time.Time) tea.Msg {
+		return rexCheckTickMsg{token: token}
+	})
+}
+
+func (m *Model) handleRexCheckTick(msg rexCheckTickMsg) (*Model, tea.Cmd) {
+	if !m.state.rexCheckPending || m.state.rexCheckToken != msg.token {
+		return m, nil
+	}
+	m.state.rexCheckPending = false
+	m.state.lastRexCheck = m.now()
+	return m, m.refreshNow()
+}
+
+// pauseTickMsg flips a session's pause marker on after the 2s debounce.
+type pauseTickMsg struct {
+	sessionID string
+	token     int
+}
+
+// pauseDebounce is the visible-pause debounce.
+const pauseDebounce = 2 * time.Second
+
+// schedulePauseCheck arms the pause tick at an absolute deadline. The deadline
+// is set on the first disconnect after a connect and survives reconnect
+// attempts, so repeated failing retries cannot push the visible pause past 2s.
+func (m *Model) schedulePauseCheck(sessionID string) tea.Cmd {
+	if sessionID == "" || m.state.streamPaused[sessionID] {
+		return nil
+	}
+	now := m.now()
+	due, ok := m.state.pauseDue[sessionID]
+	if !ok || due.IsZero() {
+		due = now.Add(pauseDebounce)
+		m.state.pauseDue[sessionID] = due
+	}
+	delay := due.Sub(now)
+	if delay < 0 {
+		delay = 0
+	}
+	m.state.pausePending[sessionID] = true
+	m.state.pauseSeq[sessionID]++
+	token := m.state.pauseSeq[sessionID]
+	m.state.pauseToken[sessionID] = token
+	return m.tick(delay, func(time.Time) tea.Msg {
+		return pauseTickMsg{sessionID: sessionID, token: token}
+	})
+}
+
+func (m *Model) handlePauseTick(msg pauseTickMsg) (*Model, tea.Cmd) {
+	if !m.state.pausePending[msg.sessionID] || m.state.pauseToken[msg.sessionID] != msg.token {
+		return m, nil
+	}
+	m.state.pausePending[msg.sessionID] = false
+	delete(m.state.pauseDue, msg.sessionID)
+	m.state.streamPaused[msg.sessionID] = true
+	m.state = m.state.rebuild()
+	return m, nil
 }
