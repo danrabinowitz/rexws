@@ -28,7 +28,8 @@ func newSwitchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			candidate, err := ops.ResolveWorkstream(cmd.Context(), cfg, args[0])
+			candidate, warnings, err := ops.ResolveWorkstreamWithWarnings(cmd.Context(), cfg, args[0])
+			writeSelectorWarnings(cmd, warnings)
 			if err != nil {
 				return resolveError(cfg, args[0], err)
 			}

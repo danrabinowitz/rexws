@@ -15,7 +15,9 @@ import (
 	"github.com/danrabinowitz/rexws/internal/git"
 	"github.com/danrabinowitz/rexws/internal/pathutil"
 	"github.com/danrabinowitz/rexws/internal/provider"
+	"github.com/danrabinowitz/rexws/internal/render"
 	"github.com/danrabinowitz/rexws/internal/rex"
+	"github.com/danrabinowitz/rexws/internal/selector"
 )
 
 // RemoveOptions controls what a removal may discard. The zero value keeps the
@@ -84,7 +86,7 @@ type RemovePlan struct {
 	ProviderName string
 	Command      []string
 	Workdir      string
-	Warnings     []error // projects that could not be read, if any
+	Warnings     []error // projects or worktrees that could not be read, if any
 
 	Force        bool
 	DeleteBranch bool
@@ -221,9 +223,23 @@ func PrepareRemove(ctx context.Context, cfg config.Config, input string) (Remove
 // branch-deletion choices. It records the exact loss before anything runs and
 // collects every refusal reason instead of stopping at the first one.
 func PrepareRemoveWithOptions(ctx context.Context, cfg config.Config, input string, opts RemoveOptions) (RemovePlan, error) {
-	candidate, discovery, err := resolveWorkstream(ctx, cfg, input)
+	plan, _, err := PrepareRemoveWithWarnings(ctx, cfg, input, opts)
+	return plan, err
+}
+
+// PrepareRemoveWithWarnings is PrepareRemoveWithOptions plus the sanitized
+// skipped-worktree warnings that could have matched the selector. The warnings
+// are returned on failure too, so the CLI can print them before a no-match
+// hint rewrites the error. The TUI uses PrepareRemoveWithOptions and does not
+// yet display them.
+func PrepareRemoveWithWarnings(ctx context.Context, cfg config.Config, input string, opts RemoveOptions) (RemovePlan, []string, error) {
+	candidate, discovery, resolver, skippedWarnings, err := resolveWorkstream(ctx, cfg, input)
+	skippedWarnings = sanitizeWarnings(skippedWarnings)
 	if err != nil {
-		return RemovePlan{}, resolutionError(err, discovery)
+		return RemovePlan{}, skippedWarnings, resolutionError(err, discovery)
+	}
+	if err := removalIncompleteError(input, candidate, discovery, skippedWarnings); err != nil {
+		return RemovePlan{}, skippedWarnings, err
 	}
 	project := candidate.Project
 	canonical := candidate.Path
@@ -231,6 +247,9 @@ func PrepareRemoveWithOptions(ctx context.Context, cfg config.Config, input stri
 	var warnings []error
 	if discoveryErr := discovery.Err(); discoveryErr != nil {
 		warnings = append(warnings, discoveryErr)
+	}
+	for _, warning := range sanitizeWarnings(AllSkippedWarnings(resolver)) {
+		warnings = append(warnings, errors.New(warning))
 	}
 
 	var reasons []string
@@ -240,19 +259,19 @@ func PrepareRemoveWithOptions(ctx context.Context, cfg config.Config, input stri
 
 	mainPath, err := pathutil.Canonical(project.Path)
 	if err != nil {
-		return RemovePlan{}, err
+		return RemovePlan{}, skippedWarnings, err
 	}
 	if canonical == mainPath {
-		return RemovePlan{}, fmt.Errorf("refusing to remove the main worktree %s", canonical)
+		return RemovePlan{}, skippedWarnings, fmt.Errorf("refusing to remove the main worktree %s", canonical)
 	}
 
 	worktrees, err := git.ListWorktrees(ctx, project.Path)
 	if err != nil {
-		return RemovePlan{}, fmt.Errorf("list worktrees of %s: %w", project.Path, err)
+		return RemovePlan{}, skippedWarnings, fmt.Errorf("list worktrees of %s: %w", project.Path, err)
 	}
 	current, ok := worktreeAt(worktrees, canonical)
 	if !ok {
-		return RemovePlan{}, fmt.Errorf("worktree %s is not registered for project %q", canonical, project.Name)
+		return RemovePlan{}, skippedWarnings, fmt.Errorf("worktree %s is not registered for project %q", canonical, project.Name)
 	}
 
 	branch := current.Branch
@@ -264,7 +283,7 @@ func PrepareRemoveWithOptions(ctx context.Context, cfg config.Config, input stri
 
 	dirtyFiles, err := git.StatusLinesIncludingIgnored(ctx, canonical)
 	if err != nil {
-		return RemovePlan{}, fmt.Errorf("check worktree %s: %w", canonical, err)
+		return RemovePlan{}, skippedWarnings, fmt.Errorf("check worktree %s: %w", canonical, err)
 	}
 	if detached && !opts.Force {
 		refuse("worktree %s has a detached HEAD %s; pass --force to remove it", canonical, shortCleanupSHA(current.Head))
@@ -425,7 +444,7 @@ func PrepareRemoveWithOptions(ctx context.Context, cfg config.Config, input stri
 	}
 
 	if err := refusalError(canonical, reasons); err != nil {
-		return RemovePlan{}, err
+		return RemovePlan{}, skippedWarnings, err
 	}
 
 	return RemovePlan{
@@ -442,7 +461,72 @@ func PrepareRemoveWithOptions(ctx context.Context, cfg config.Config, input stri
 		DeleteBranch: opts.DeleteBranch,
 		HeadSHA:      current.Head,
 		Loss:         loss,
-	}, nil
+	}, skippedWarnings, nil
+}
+
+// removalIncompleteError refuses a removal when the candidate set is
+// incomplete in a way that could change which workstream the selector names.
+// A skipped worktree that could match blocks every selector except an explicit
+// path:. An unreadable project blocks selectors that do not name one readable
+// workstream, such as branch, substring, and active/current. An explicit path:
+// selector that resolved among readable worktrees cannot name a different
+// worktree and is allowed; it is the escape hatch when something else is
+// unreadable. Nothing destructive may proceed silently on a partial candidate
+// set.
+func removalIncompleteError(input string, candidate selector.Candidate, discovery Discovery, warnings []string) error {
+	if len(warnings) > 0 && !isExplicitPathSelector(input) {
+		// The warnings themselves travel separately so the CLI can print them
+		// before the error; keep the error readable for callers that only see it.
+		return fmt.Errorf(
+			"refusing to remove by %q: worktrees that could not be read may match the selector; rerun with path:<path> to name a readable worktree",
+			input)
+	}
+	if discovery.Err() != nil && !isExplicitSelection(input, candidate) {
+		return fmt.Errorf(
+			"refusing to remove by %q: some projects could not be read and may contain the target: %v; rerun with path:<path> to name a readable worktree",
+			input, discovery.Err())
+	}
+	return nil
+}
+
+func isExplicitPathSelector(input string) bool {
+	return strings.HasPrefix(strings.TrimSpace(input), "path:")
+}
+
+// sanitizeWarnings makes skipped-worktree warnings safe to print in a
+// terminal. A path may contain control bytes, including the newline that makes
+// the porcelain parser produce a skipped candidate in the first place.
+func sanitizeWarnings(warnings []string) []string {
+	if len(warnings) == 0 {
+		return nil
+	}
+	safe := make([]string, len(warnings))
+	for i, warning := range warnings {
+		safe[i] = render.Sanitize(warning)
+	}
+	return safe
+}
+
+// isExplicitSelection reports whether the selector names one project/branch,
+// session label, or canonical path that came from readable discovery. A
+// branch, substring, or active selector can span projects, so an unreadable
+// project could change its meaning.
+func isExplicitSelection(input string, candidate selector.Candidate) bool {
+	trimmed := strings.TrimSpace(input)
+	if isExplicitPathSelector(trimmed) {
+		return true
+	}
+	if value, ok := strings.CutPrefix(trimmed, "name:"); ok {
+		return candidate.SessionName == strings.TrimSpace(value)
+	}
+	if strings.HasPrefix(trimmed, "branch:") || trimmed == "active" || trimmed == "current" {
+		return false
+	}
+	if candidate.SessionName == trimmed {
+		return true
+	}
+	canonical, err := pathutil.Canonical(pathutil.ExpandHome(trimmed))
+	return err == nil && canonical == candidate.Path
 }
 
 // refusalError keeps a single refusal message unchanged and joins multiple

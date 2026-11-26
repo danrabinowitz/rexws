@@ -32,18 +32,17 @@ func newHereCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			candidate, discovery, err := ops.ResolveHere(cmd.Context(), cfg, dir)
+			candidate, discovery, warnings, err := ops.ResolveHereWithWarnings(cmd.Context(), cfg, dir)
 			if err != nil {
+				writeSelectorWarnings(cmd, warnings)
 				return err
 			}
 			state, err := config.LoadState(cfg.StatusIDs())
 			if err != nil {
 				return err
 			}
-			workstreams, err := core.Build(discovery.Inputs, state, nil, cfg)
-			if err != nil {
-				return err
-			}
+			workstreams, buildWarnings := core.BuildWithWarnings(discovery.Inputs, state, nil, cfg)
+			writeSelectorWarnings(cmd, buildWarnings)
 			workstream, ok := workstreamByPath(workstreams, candidate.Path)
 			if !ok {
 				return fmt.Errorf("resolved workstream %s is not among the discovered worktrees", candidate.Path)

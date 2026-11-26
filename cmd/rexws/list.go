@@ -43,14 +43,12 @@ func newListCmd() *cobra.Command {
 			if rexState.Err != nil {
 				warnings = []string{fmt.Sprintf("Rex unavailable: %v", rexState.Err)}
 			}
-			workstreams, err := core.Build(inputs, state, rexState.Sessions, cfg)
-			if err != nil {
-				return err
-			}
+			workstreams, buildWarnings := core.BuildWithWarnings(inputs, state, rexState.Sessions, cfg)
+			warnings = append(warnings, buildWarnings...)
 			workstreams = core.FilterStatuses(workstreams, filter)
 
 			for _, warning := range warnings {
-				fmt.Fprintln(cmd.ErrOrStderr(), "warning:", warning)
+				fmt.Fprintln(cmd.ErrOrStderr(), "warning:", render.Sanitize(warning))
 			}
 
 			if asJSON {

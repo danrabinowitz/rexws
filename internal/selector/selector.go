@@ -35,6 +35,14 @@ type Candidate struct {
 // ID is the workstream's human identifier: its Rex session label.
 func (c Candidate) ID() string { return c.SessionName }
 
+// SkippedWorktree is a discovered worktree whose path could not be
+// canonicalized. The type is shared with core so the selector and the
+// workstream model skip the same candidates. It is left out of the resolver so
+// one stale, unreadable, or symlink-broken worktree cannot break every
+// selector; callers surface it when a selector could have matched it, or when
+// a destructive action needs to know that the candidate set is incomplete.
+type SkippedWorktree = core.SkippedWorktree
+
 // NoMatchError reports that a selector resolved to no workstream.
 type NoMatchError struct {
 	Selector string
@@ -108,6 +116,7 @@ func (e *NoActiveWorkstreamError) Unwrap() error { return ErrNoActiveWorkstream 
 // Resolver resolves selectors against a fixed set of candidates.
 type Resolver struct {
 	candidates []Candidate
+	skipped    []SkippedWorktree
 }
 
 // New returns a resolver over already-canonical candidates.
@@ -117,21 +126,21 @@ func New(candidates []Candidate) *Resolver {
 
 // FromInputs builds a resolver from discovered worktrees. Bare and prunable
 // worktrees are skipped and every path is canonicalized, matching what list
-// and the TUI display.
-func FromInputs(inputs []core.Input) (*Resolver, error) {
+// and the TUI display. A worktree that cannot be canonicalized is recorded in
+// Skipped instead of failing the whole resolver, so one bad path cannot break
+// unrelated selectors.
+func FromInputs(inputs []core.Input) *Resolver {
 	candidates := make([]Candidate, 0)
+	var skipped []SkippedWorktree
 	for _, input := range inputs {
 		for _, wt := range input.Worktrees {
-			if wt.Bare || wt.Prunable {
+			path, branch, skippedWorktree, ok := core.WorktreeCandidate(input.Project, wt)
+			if skippedWorktree != nil {
+				skipped = append(skipped, *skippedWorktree)
 				continue
 			}
-			path, err := pathutil.Canonical(wt.Path)
-			if err != nil {
-				return nil, fmt.Errorf("project %s: %w", input.Project.Name, err)
-			}
-			branch := wt.Branch
-			if branch == "" {
-				branch = wt.ShortHead()
+			if !ok {
+				continue
 			}
 			candidates = append(candidates, Candidate{
 				Project:     input.Project,
@@ -142,12 +151,214 @@ func FromInputs(inputs []core.Input) (*Resolver, error) {
 			})
 		}
 	}
-	return New(candidates), nil
+	return &Resolver{candidates: candidates, skipped: skipped}
 }
 
 // Candidates returns a copy of the resolver's candidates.
 func (r *Resolver) Candidates() []Candidate {
 	return append([]Candidate(nil), r.candidates...)
+}
+
+// Skipped returns a copy of the discovered worktrees left out because their
+// paths could not be canonicalized.
+func (r *Resolver) Skipped() []SkippedWorktree {
+	return append([]SkippedWorktree(nil), r.skipped...)
+}
+
+// warningsFor reports skipped worktrees the selector could have matched. A
+// skipped worktree in an unrelated project stays quiet.
+func (r *Resolver) warningsFor(raw string, cwd cwdSource) []string {
+	if len(r.skipped) == 0 {
+		return nil
+	}
+	input := strings.TrimSpace(raw)
+	var affected []SkippedWorktree
+	switch {
+	case input == "active" || input == "current":
+		dir, err := currentDir(cwd)
+		if err == nil {
+			if canonical, err := pathutil.Canonical(expandHome(dir)); err == nil {
+				affected = r.skippedContaining(canonical)
+			}
+		}
+	case strings.HasPrefix(input, "branch:"):
+		value := strings.TrimSpace(strings.TrimPrefix(input, "branch:"))
+		affected = r.skippedMatching(func(s SkippedWorktree) bool { return s.Branch == value })
+	case strings.HasPrefix(input, "path:"):
+		value := strings.TrimSpace(strings.TrimPrefix(input, "path:"))
+		if skipped, ok := r.skippedAt(value, cwd); ok {
+			affected = append(affected, skipped)
+		}
+	case strings.HasPrefix(input, "name:"):
+		value := strings.TrimSpace(strings.TrimPrefix(input, "name:"))
+		affected = r.skippedMatching(func(s SkippedWorktree) bool { return s.SessionName == value })
+	default:
+		switch {
+		case len(r.bySessionName(input)) > 0:
+			// The exact identity won before the substring rule, so only a
+			// skipped worktree with the same identity could have changed it.
+			affected = r.skippedMatching(func(s SkippedWorktree) bool { return s.SessionName == input })
+		case r.isPathSelection(input, cwd):
+			if skipped, ok := r.skippedAt(input, cwd); ok {
+				affected = append(affected, skipped)
+			}
+		default:
+			needle := strings.ToLower(input)
+			affected = r.skippedMatching(func(s SkippedWorktree) bool {
+				return s.SessionName == input || r.skippedPathEqual(s.Path, input, cwd) || skippedSubstring(s, needle)
+			})
+		}
+	}
+	return skippedWarnings(affected)
+}
+
+// warningsForDir reports skipped worktrees whose path contains dir, the rule
+// behind active/current.
+func (r *Resolver) warningsForDir(dir string) []string {
+	return skippedWarnings(r.skippedContaining(dir))
+}
+
+func (r *Resolver) skippedContaining(dir string) []SkippedWorktree {
+	var matches []SkippedWorktree
+	for _, skipped := range r.skipped {
+		abs, ok := bestEffortCanonical(skipped.Path, nil)
+		if ok && lexicalPathContains(abs, dir) {
+			matches = append(matches, skipped)
+		}
+	}
+	return matches
+}
+
+func (r *Resolver) skippedMatching(match func(SkippedWorktree) bool) []SkippedWorktree {
+	var matches []SkippedWorktree
+	for _, skipped := range r.skipped {
+		if match(skipped) {
+			matches = append(matches, skipped)
+		}
+	}
+	return matches
+}
+
+// skippedAt finds a skipped worktree by path. Both sides use best-effort
+// canonicalization, because the skipped path itself does not exist but its
+// existing ancestors may still contain symlinks.
+func (r *Resolver) skippedAt(value string, cwd cwdSource) (SkippedWorktree, bool) {
+	if len(r.skipped) == 0 {
+		return SkippedWorktree{}, false
+	}
+	target, ok := bestEffortCanonical(value, cwd)
+	if !ok {
+		return SkippedWorktree{}, false
+	}
+	for _, skipped := range r.skipped {
+		abs, ok := bestEffortCanonical(skipped.Path, cwd)
+		if ok && abs == target {
+			return skipped, true
+		}
+	}
+	return SkippedWorktree{}, false
+}
+
+// isPathSelection reports whether input resolved as an existing literal path,
+// which wins over the substring rule.
+func (r *Resolver) isPathSelection(input string, cwd cwdSource) bool {
+	canonical, err := canonicalFrom(input, cwd)
+	return err == nil && len(r.byPath(canonical)) > 0
+}
+
+func (r *Resolver) skippedPathEqual(skippedPath, input string, cwd cwdSource) bool {
+	target, ok := bestEffortCanonical(input, cwd)
+	if !ok {
+		return false
+	}
+	abs, ok := bestEffortCanonical(skippedPath, cwd)
+	if !ok {
+		return false
+	}
+	return abs == target
+}
+
+func skippedSubstring(s SkippedWorktree, needle string) bool {
+	if needle == "" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(s.Project.Name), needle) ||
+		strings.Contains(strings.ToLower(s.Branch), needle) ||
+		strings.Contains(strings.ToLower(s.Path), needle)
+}
+
+// skippedWarnings renders affected skipped worktrees in a stable order.
+func skippedWarnings(affected []SkippedWorktree) []string {
+	if len(affected) == 0 {
+		return nil
+	}
+	sort.SliceStable(affected, func(i, j int) bool {
+		if affected[i].SessionName != affected[j].SessionName {
+			return affected[i].SessionName < affected[j].SessionName
+		}
+		return affected[i].Path < affected[j].Path
+	})
+	warnings := make([]string, 0, len(affected))
+	for _, skipped := range affected {
+		warnings = append(warnings, skipped.Warning())
+	}
+	return warnings
+}
+
+// absolutePath makes path absolute against cwd without resolving symlinks, so
+// a skipped path can still be compared.
+func absolutePath(path string, cwd cwdSource) (string, bool) {
+	if !filepath.IsAbs(path) {
+		dir, err := currentDir(cwd)
+		if err != nil {
+			return "", false
+		}
+		path = filepath.Join(dir, path)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	return abs, true
+}
+
+// bestEffortCanonical makes path absolute and resolves symlinks in its
+// deepest existing ancestor, then rejoins the missing suffix. Unlike
+// pathutil.Canonical it succeeds for a path that does not exist, so a skipped
+// worktree can compare equal to a selector path spelled through a symlink
+// (/var/... versus /private/var/... on macOS, for example). A broken final
+// symlink is deliberately compared by its lexical spelling: resolving it
+// would name the missing target, which is a different path.
+func bestEffortCanonical(path string, cwd cwdSource) (string, bool) {
+	abs, ok := absolutePath(expandHome(path), cwd)
+	if !ok {
+		return "", false
+	}
+	return canonicalExistingPrefix(abs), true
+}
+
+func canonicalExistingPrefix(abs string) string {
+	if canonical, err := filepath.EvalSymlinks(abs); err == nil {
+		return canonical
+	}
+	current := filepath.Clean(abs)
+	var suffix []string
+	for {
+		parent := filepath.Dir(current)
+		if parent == current {
+			return filepath.Clean(abs)
+		}
+		suffix = append(suffix, filepath.Base(current))
+		current = parent
+		canonical, err := filepath.EvalSymlinks(current)
+		if err != nil {
+			continue
+		}
+		for i := len(suffix) - 1; i >= 0; i-- {
+			canonical = filepath.Join(canonical, suffix[i])
+		}
+		return filepath.Clean(canonical)
+	}
 }
 
 // cwdSource supplies a current directory lazily, so selectors that do not
@@ -164,6 +375,23 @@ func (r *Resolver) Resolve(selector string) (Candidate, error) {
 // frontends that already know the directory should use it over Resolve.
 func (r *Resolver) ResolveAt(selector, cwd string) (Candidate, error) {
 	return r.resolve(selector, func() (string, error) { return cwd, nil })
+}
+
+// ResolveWithWarnings resolves like Resolve and also reports skipped worktrees
+// the selector could have matched. The warnings are empty when no skipped
+// worktree is relevant, so unrelated selectors stay quiet.
+func (r *Resolver) ResolveWithWarnings(selector string) (Candidate, []string, error) {
+	return r.resolveWithWarnings(selector, nil)
+}
+
+// ResolveAtWithWarnings is ResolveAt with the same skipped-worktree warnings.
+func (r *Resolver) ResolveAtWithWarnings(selector, cwd string) (Candidate, []string, error) {
+	return r.resolveWithWarnings(selector, func() (string, error) { return cwd, nil })
+}
+
+func (r *Resolver) resolveWithWarnings(raw string, cwd cwdSource) (Candidate, []string, error) {
+	candidate, err := r.resolve(raw, cwd)
+	return candidate, r.warningsFor(raw, cwd), err
 }
 
 func (r *Resolver) resolve(raw string, cwd cwdSource) (Candidate, error) {
@@ -191,10 +419,16 @@ func (r *Resolver) resolve(raw string, cwd cwdSource) (Candidate, error) {
 			}
 			canonical, err := canonicalFrom(value, cwd)
 			if err != nil {
+				if skipped, ok := r.skippedAt(value, cwd); ok {
+					return Candidate{}, &NoMatchError{Selector: input, Detail: skipped.Detail()}
+				}
 				return Candidate{}, &NoMatchError{Selector: input, Detail: err.Error()}
 			}
 			matches := r.byPath(canonical)
 			if len(matches) == 0 {
+				if skipped, ok := r.skippedAt(canonical, cwd); ok {
+					return Candidate{}, &NoMatchError{Selector: input, Detail: skipped.Detail()}
+				}
 				return Candidate{}, &NoMatchError{Selector: input, Detail: fmt.Sprintf("%s is not a registered worktree", canonical)}
 			}
 			return r.unique(input, matches)
@@ -218,10 +452,16 @@ func (r *Resolver) resolve(raw string, cwd cwdSource) (Candidate, error) {
 		if matches := r.byPath(canonical); len(matches) > 0 {
 			return r.unique(input, matches)
 		}
+		if skipped, ok := r.skippedAt(canonical, cwd); ok {
+			return Candidate{}, &NoMatchError{Selector: input, Detail: skipped.Detail()}
+		}
 		return Candidate{}, &NoMatchError{
 			Selector: input,
 			Detail:   fmt.Sprintf("%s exists but is not a registered worktree", canonical),
 		}
+	}
+	if skipped, ok := r.skippedAt(input, cwd); ok {
+		return Candidate{}, &NoMatchError{Selector: input, Detail: skipped.Detail()}
 	}
 	return r.unique(input, r.bySubstring(input))
 }
@@ -245,6 +485,17 @@ func (r *Resolver) current(selector string, cwd cwdSource) (Candidate, error) {
 		return Candidate{}, err
 	}
 	return Candidate{}, fmt.Errorf("resolve current directory: %w", err)
+}
+
+// CurrentWithWarnings resolves like Current and also reports skipped
+// worktrees whose path contains dir, which could have changed the result.
+func (r *Resolver) CurrentWithWarnings(dir string) (Candidate, []string, error) {
+	candidate, err := r.Current(dir)
+	canonical, canonicalErr := pathutil.Canonical(expandHome(dir))
+	if canonicalErr != nil {
+		return candidate, nil, err
+	}
+	return candidate, r.warningsForDir(canonical), err
 }
 
 // Current resolves the workstream whose path contains dir, the rule behind the
@@ -403,19 +654,7 @@ func canonicalFrom(path string, cwd cwdSource) (string, error) {
 	return pathutil.Canonical(path)
 }
 
-func expandHome(path string) string {
-	if path != "~" && !strings.HasPrefix(path, "~/") {
-		return path
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-	if path == "~" {
-		return home
-	}
-	return filepath.Join(home, path[len("~/"):])
-}
+func expandHome(path string) string { return pathutil.ExpandHome(path) }
 
 // pathContains reports whether dir is worktree itself or lies under it. It
 // compares path components first, then filesystem identity so a

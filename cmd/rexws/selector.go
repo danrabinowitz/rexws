@@ -5,10 +5,22 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/pathutil"
+	"github.com/danrabinowitz/rexws/internal/render"
 	"github.com/danrabinowitz/rexws/internal/selector"
 )
+
+// writeSelectorWarnings reports worktrees that were skipped because their
+// paths could not be read. Warnings go to stderr so --json keeps stdout a
+// single document.
+func writeSelectorWarnings(cmd *cobra.Command, warnings []string) {
+	for _, warning := range warnings {
+		fmt.Fprintln(cmd.ErrOrStderr(), "warning:", render.Sanitize(warning))
+	}
+}
 
 // resolveError keeps the project/branch hints for a selector that matched no
 // workstream, while preserving selector.ErrNoMatch for exit codes.

@@ -27,7 +27,8 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			change, err := ops.SetStatus(cmd.Context(), cfg, args[0], status)
+			change, warnings, err := ops.SetStatusWithWarnings(cmd.Context(), cfg, args[0], status)
+			writeSelectorWarnings(cmd, warnings)
 			if err != nil {
 				return resolveError(cfg, args[0], err)
 			}

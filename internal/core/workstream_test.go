@@ -142,13 +142,41 @@ func TestBuildDetachedWorktree(t *testing.T) {
 	}
 }
 
-func TestBuildFailsForMissingWorktree(t *testing.T) {
+func TestBuildSkipsMissingWorktreeAndReportsWarning(t *testing.T) {
+	base := t.TempDir()
+	readable := filepath.Join(base, "readable")
+	if err := os.MkdirAll(readable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(base, "missing")
 	inputs := []Input{{
-		Project:   config.Project{Name: "repo", Path: "/code/repo"},
-		Worktrees: []git.Worktree{{Path: filepath.Join(t.TempDir(), "missing"), Branch: "main"}},
+		Project: config.Project{Name: "repo", Path: readable},
+		Worktrees: []git.Worktree{
+			{Path: readable, Branch: "main"},
+			{Path: missing, Branch: "feat/gone"},
+		},
 	}}
-	if _, err := Build(inputs, config.NewState(), nil, config.Default()); err == nil {
-		t.Fatal("expected an error for a missing worktree path")
+
+	workstreams, warnings := BuildWithWarnings(inputs, config.NewState(), nil, config.Default())
+	if len(workstreams) != 1 || workstreams[0].Branch != "main" {
+		t.Fatalf("workstreams = %#v, want the readable worktree", workstreams)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %#v, want one", warnings)
+	}
+	for _, want := range []string{"project repo", missing, "feat/gone", "unreadable"} {
+		if !strings.Contains(warnings[0], want) {
+			t.Errorf("warning does not mention %q: %s", want, warnings[0])
+		}
+	}
+
+	// Build keeps its historical signature and silently drops the warning.
+	workstreams, err := Build(inputs, config.NewState(), nil, config.Default())
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(workstreams) != 1 {
+		t.Fatalf("Build returned %d workstreams, want the readable one", len(workstreams))
 	}
 }
 

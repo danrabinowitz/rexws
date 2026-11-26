@@ -14,15 +14,25 @@ import (
 	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/core"
 	"github.com/danrabinowitz/rexws/internal/ops"
+	"github.com/danrabinowitz/rexws/internal/render"
 	"github.com/danrabinowitz/rexws/internal/selector"
 	"github.com/danrabinowitz/rexws/internal/tui"
 )
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "rexws:", err)
+		fmt.Fprintln(os.Stderr, "rexws:", formatCLIError(err))
 		os.Exit(exitCode(err))
 	}
+}
+
+// formatCLIError makes an error safe to print in a terminal. Error text may
+// embed a worktree path or a Git message; an ESC sequence in either must not
+// reach the terminal. Control characters, including newlines and tabs, collapse
+// to "?", which is acceptable because no current CLI error depends on
+// multi-line layout.
+func formatCLIError(err error) string {
+	return render.Sanitize(err.Error())
 }
 
 // exitCode gives selector failures stable, scriptable exit codes. Everything

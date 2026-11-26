@@ -3,7 +3,9 @@ package pathutil
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Canonical returns an absolute, symlink-resolved path. It fails if the path
@@ -18,4 +20,20 @@ func Canonical(path string) (string, error) {
 		return "", fmt.Errorf("resolve %q: %w", path, err)
 	}
 	return resolved, nil
+}
+
+// ExpandHome replaces a leading ~ or ~/ with the user's home directory. Any
+// other path is returned unchanged.
+func ExpandHome(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, path[len("~/"):])
 }

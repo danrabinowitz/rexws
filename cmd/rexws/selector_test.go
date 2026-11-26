@@ -24,6 +24,22 @@ func mustCanonical(t *testing.T, path string) string {
 	return canonical
 }
 
+func TestWriteSelectorWarningsUsesStderr(t *testing.T) {
+	var out, errOut lockedBuffer
+	root := newRootCmd()
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+
+	writeSelectorWarnings(root, []string{"project repo: worktree /wt/missing is unreadable and was skipped: missing"})
+
+	if out.String() != "" {
+		t.Errorf("warning wrote stdout: %q", out.String())
+	}
+	if !strings.Contains(errOut.String(), "warning: project repo: worktree /wt/missing") {
+		t.Errorf("warning missing from stderr: %q", errOut.String())
+	}
+}
+
 func TestSwitchResolvesBranchActiveAndSubstring(t *testing.T) {
 	repo := testRepo(t)
 	root := filepath.Join(t.TempDir(), "worktrees")

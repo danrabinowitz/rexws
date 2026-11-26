@@ -78,11 +78,14 @@ func newRmCmd() *cobra.Command {
 			if asJSON {
 				providerOut = cmd.ErrOrStderr()
 			}
-			plan, err := ops.PrepareRemoveWithOptions(cmd.Context(), cfg, args[0], ops.RemoveOptions{
+			plan, warnings, err := ops.PrepareRemoveWithWarnings(cmd.Context(), cfg, args[0], ops.RemoveOptions{
 				Force:        force,
 				DeleteBranch: deleteBranch,
 			})
 			if err != nil {
+				// The no-match hint rewrites the error message, so print the
+				// skipped-worktree warnings before handing it over.
+				writeSelectorWarnings(cmd, warnings)
 				return resolveError(cfg, args[0], err)
 			}
 			for _, warning := range plan.Warnings {

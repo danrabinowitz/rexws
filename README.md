@@ -252,6 +252,31 @@ identity by construction; choose one with `path:`. `rexws here` uses the same
 containment rule for the current directory; see
 [Resolving the current workstream](#resolving-the-current-workstream).
 
+A worktree whose path cannot be resolved — missing, unreadable, behind a
+broken symlink, or containing a newline that `git worktree list --porcelain`
+cannot represent — is skipped instead of failing every selector or list.
+`list` and `here` always print a warning on stderr naming every skipped
+worktree's project and path, because both build the full workstream view;
+`list --json` also includes them in its `warnings` array. `switch` and `status`
+print the warning only when the skipped worktree could have matched the
+selection; an unrelated skipped worktree stays quiet there. `--json` output
+keeps stdout a single document.
+
+`rm` refuses a selector when an unreadable project or a skipped worktree could
+change which workstream it names. The refusal names the unreadable project or
+worktree on stderr and asks for a `path:<path>` selector. A `path:` selector that
+resolves among readable worktrees is always allowed because it names one exact
+directory; an exact `<project>/<branch>` or `name:` also stays allowed when
+only an unrelated project is unreadable. An allowed removal still prints every
+skipped-worktree warning on stderr. When the selector matches nothing, `rm`
+prints the skipped-worktree warnings before the create-or-register hint, so the
+hint cannot hide them. `rm` never removes a workstream on a silently incomplete
+candidate set.
+
+A newline in a worktree path is a known limitation of the current porcelain
+parser; rexws reports that worktree as skipped and leaves the readable ones
+usable rather than failing every command.
+
 Selector failures have stable exit codes so scripts can branch without parsing
 messages:
 

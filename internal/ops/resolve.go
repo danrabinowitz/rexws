@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/danrabinowitz/rexws/internal/config"
@@ -17,11 +18,20 @@ import (
 // inventing their own lookup; `rexws here` resolves the current directory
 // through ResolveHere.
 func ResolveWorkstream(ctx context.Context, cfg config.Config, input string) (selector.Candidate, error) {
-	candidate, discovery, err := resolveWorkstream(ctx, cfg, input)
+	candidate, _, err := ResolveWorkstreamWithWarnings(ctx, cfg, input)
+	return candidate, err
+}
+
+// ResolveWorkstreamWithWarnings resolves like ResolveWorkstream and also
+// reports worktrees that were skipped because their paths could not be read
+// and could have matched the selector. Callers print these warnings on stderr;
+// a warning does not replace the selected readable candidate.
+func ResolveWorkstreamWithWarnings(ctx context.Context, cfg config.Config, input string) (selector.Candidate, []string, error) {
+	candidate, discovery, _, warnings, err := resolveWorkstream(ctx, cfg, input)
 	if err != nil {
-		return selector.Candidate{}, resolutionError(err, discovery)
+		return selector.Candidate{}, warnings, resolutionError(err, discovery)
 	}
-	return candidate, nil
+	return candidate, warnings, nil
 }
 
 // ResolveHere resolves the workstream whose worktree contains dir, using the
@@ -31,31 +41,36 @@ func ResolveWorkstream(ctx context.Context, cfg config.Config, input string) (se
 // discovery snapshot so callers can build the joined workstream view without
 // listing worktrees twice.
 func ResolveHere(ctx context.Context, cfg config.Config, dir string) (selector.Candidate, Discovery, error) {
+	candidate, discovery, _, err := ResolveHereWithWarnings(ctx, cfg, dir)
+	return candidate, discovery, err
+}
+
+// ResolveHereWithWarnings resolves like ResolveHere and also reports skipped
+// worktrees whose path contains the resolved directory. They are empty when
+// the directory is unrelated to every skipped worktree.
+func ResolveHereWithWarnings(ctx context.Context, cfg config.Config, dir string) (selector.Candidate, Discovery, []string, error) {
 	discovery := Discover(ctx, cfg)
-	resolver, err := selector.FromInputs(discovery.Inputs)
-	if err != nil {
-		return selector.Candidate{}, discovery, err
-	}
+	resolver := selector.FromInputs(discovery.Inputs)
 	if dir == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
-			return selector.Candidate{}, discovery, fmt.Errorf("cannot determine the current directory: %w", err)
+			return selector.Candidate{}, discovery, nil, fmt.Errorf("cannot determine the current directory: %w", err)
 		}
-		candidate, err := resolver.Current(cwd)
+		candidate, warnings, err := resolver.CurrentWithWarnings(cwd)
 		if err == nil {
-			return candidate, discovery, nil
+			return candidate, discovery, warnings, nil
 		}
 		if isResolutionMiss(err) {
-			return selector.Candidate{}, discovery, resolutionError(withNoProjectsHint(err, cfg), discovery)
+			return selector.Candidate{}, discovery, warnings, resolutionError(withNoProjectsHint(err, cfg), discovery)
 		}
-		return selector.Candidate{}, discovery, fmt.Errorf("cannot determine the current directory: %w", err)
+		return selector.Candidate{}, discovery, warnings, fmt.Errorf("cannot determine the current directory: %w", err)
 	}
-	candidate, err := resolver.Current(dir)
+	candidate, warnings, err := resolver.CurrentWithWarnings(dir)
 	if err != nil {
 		err = withNoProjectsHint(resolutionError(err, discovery), cfg)
-		return selector.Candidate{}, discovery, fmt.Errorf("--dir %q: %w", dir, err)
+		return selector.Candidate{}, discovery, warnings, fmt.Errorf("--dir %q: %w", dir, err)
 	}
-	return candidate, discovery, nil
+	return candidate, discovery, warnings, nil
 }
 
 // ContextSelector names workstream so another command can resolve it from any
@@ -102,16 +117,34 @@ func withNoProjectsHint(err error, cfg config.Config) error {
 }
 
 // resolveWorkstream resolves a selector and also returns the discovery
-// snapshot, so a caller can surface projects that could not be read or reuse
-// the worktrees.
-func resolveWorkstream(ctx context.Context, cfg config.Config, input string) (selector.Candidate, Discovery, error) {
+// snapshot, the resolver, and skipped-worktree warnings, so a caller can
+// surface incomplete discovery, disclose every skipped worktree, or reuse the
+// worktrees.
+func resolveWorkstream(ctx context.Context, cfg config.Config, input string) (selector.Candidate, Discovery, *selector.Resolver, []string, error) {
 	discovery := Discover(ctx, cfg)
-	resolver, err := selector.FromInputs(discovery.Inputs)
-	if err != nil {
-		return selector.Candidate{}, discovery, err
+	resolver := selector.FromInputs(discovery.Inputs)
+	candidate, warnings, err := resolver.ResolveWithWarnings(input)
+	return candidate, discovery, resolver, warnings, err
+}
+
+// AllSkippedWarnings reports every worktree left out of the resolver, not only
+// the ones a selector could match. Destructive callers use it to disclose an
+// incomplete candidate set even when the target is an explicit path. It reuses
+// the resolver built for selection and uses the same stable order as the
+// selector's own warnings.
+func AllSkippedWarnings(resolver *selector.Resolver) []string {
+	skipped := resolver.Skipped()
+	sort.SliceStable(skipped, func(i, j int) bool {
+		if skipped[i].SessionName != skipped[j].SessionName {
+			return skipped[i].SessionName < skipped[j].SessionName
+		}
+		return skipped[i].Path < skipped[j].Path
+	})
+	warnings := make([]string, 0, len(skipped))
+	for _, item := range skipped {
+		warnings = append(warnings, item.Warning())
 	}
-	candidate, err := resolver.Resolve(input)
-	return candidate, discovery, err
+	return warnings
 }
 
 // resolutionError adds discovery problems to a selector miss, wrapping both

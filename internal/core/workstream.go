@@ -76,6 +76,60 @@ type Input struct {
 	Worktrees []git.Worktree
 }
 
+// SkippedWorktree is a discovered worktree whose path could not be
+// canonicalized. Both the workstream model and the selector leave it out of
+// their candidate set so one stale, unreadable, or symlink-broken worktree
+// cannot break unrelated results.
+type SkippedWorktree struct {
+	Project     config.Project
+	Path        string
+	Branch      string
+	SessionName string
+	Err         error
+}
+
+// Warning names the project and worktree and explains why it was skipped.
+func (s SkippedWorktree) Warning() string {
+	name := s.Path
+	if s.Branch != "" {
+		name = fmt.Sprintf("%s (%s)", s.Path, s.Branch)
+	}
+	return fmt.Sprintf("project %s: worktree %s is unreadable and was skipped: %v", s.Project.Name, name, s.Err)
+}
+
+// Detail explains a selector that names a skipped worktree.
+func (s SkippedWorktree) Detail() string {
+	return fmt.Sprintf("%s is a worktree of project %s but its path could not be read: %v; it was skipped",
+		s.Path, s.Project.Name, s.Err)
+}
+
+// WorktreeCandidate resolves one discovered worktree into the values the
+// workstream model and the selector both use. ok is false for a bare or
+// prunable worktree, which are intentionally ignored. skipped is non-nil when
+// the path cannot be canonicalized; the caller leaves the worktree out and may
+// report skipped.Warning(). Sharing this helper keeps the two candidate sets
+// from drifting.
+func WorktreeCandidate(project config.Project, wt git.Worktree) (path, branch string, skipped *SkippedWorktree, ok bool) {
+	if wt.Bare || wt.Prunable {
+		return "", "", nil, false
+	}
+	branch = wt.Branch
+	if branch == "" {
+		branch = wt.ShortHead()
+	}
+	path, err := pathutil.Canonical(wt.Path)
+	if err != nil {
+		return "", branch, &SkippedWorktree{
+			Project:     project,
+			Path:        wt.Path,
+			Branch:      branch,
+			SessionName: project.Name + "/" + branch,
+			Err:         err,
+		}, false
+	}
+	return path, branch, nil, true
+}
+
 // Session is a Rex session enriched with its agents and windows.
 type Session struct {
 	ID    string
@@ -91,8 +145,17 @@ type Session struct {
 
 // Build joins worktree discovery with state.json and Rex sessions. cfg
 // supplies the default status and the display labels, so every frontend gets
-// the same labels without resolving them again.
+// the same labels without resolving them again. A worktree whose path cannot
+// be canonicalized is skipped; Build drops its warning, while
+// BuildWithWarnings returns it for callers that can display it.
 func Build(inputs []Input, state config.State, sessions []Session, cfg config.Config) ([]Workstream, error) {
+	workstreams, _ := BuildWithWarnings(inputs, state, sessions, cfg)
+	return workstreams, nil
+}
+
+// BuildWithWarnings is Build plus warnings for worktrees that could not be
+// canonicalized and were skipped. The readable worktrees stay usable.
+func BuildWithWarnings(inputs []Input, state config.State, sessions []Session, cfg config.Config) ([]Workstream, []string) {
 	byLabel := make(map[string]Session, len(sessions))
 	for _, s := range sessions {
 		// Rex does not enforce unique labels. The first session in server
@@ -102,19 +165,17 @@ func Build(inputs []Input, state config.State, sessions []Session, cfg config.Co
 		}
 	}
 
+	warnings := make([]string, 0)
 	workstreams := make([]Workstream, 0)
 	for _, input := range inputs {
 		for _, wt := range input.Worktrees {
-			if wt.Bare || wt.Prunable {
+			path, branch, skipped, ok := WorktreeCandidate(input.Project, wt)
+			if skipped != nil {
+				warnings = append(warnings, skipped.Warning())
 				continue
 			}
-			path, err := pathutil.Canonical(wt.Path)
-			if err != nil {
-				return nil, fmt.Errorf("project %s: %w", input.Project.Name, err)
-			}
-			branch := wt.Branch
-			if branch == "" {
-				branch = wt.ShortHead()
+			if !ok {
+				continue
 			}
 			stored := state.For(path, cfg.DefaultStatusValue())
 			ws := Workstream{
@@ -155,7 +216,7 @@ func Build(inputs []Input, state config.State, sessions []Session, cfg config.Co
 		}
 		return a.Branch < b.Branch
 	})
-	return workstreams, nil
+	return workstreams, warnings
 }
 
 // Summarize reduces per-block agents to the most urgent state. Unknown agents

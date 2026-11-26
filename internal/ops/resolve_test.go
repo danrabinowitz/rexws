@@ -307,7 +307,7 @@ func TestResolveWorkstreamSurfacesDiscoveryErrors(t *testing.T) {
 	}
 }
 
-func TestPrepareRemoveSurfacesDiscoveryWarning(t *testing.T) {
+func TestPrepareRemoveBlocksPartialDiscoveryUnlessPathSelector(t *testing.T) {
 	repo := testRepo(t)
 	root := filepath.Join(t.TempDir(), "worktrees")
 	cfg := testConfig(t, repo, root)
@@ -320,9 +320,23 @@ func TestPrepareRemoveSurfacesDiscoveryWarning(t *testing.T) {
 esac
 `)
 
-	plan, err := PrepareRemove(context.Background(), cfg, "branch:feat/warn")
+	// A branch selector could name a worktree in the unreadable project, so rm
+	// must not guess.
+	_, err := PrepareRemove(context.Background(), cfg, "branch:feat/warn")
+	if err == nil || !strings.Contains(err.Error(), "some projects could not be read") {
+		t.Fatalf("err = %v, want an explicit refusal", err)
+	}
+	for _, want := range []string{"project bad", "path:<path>"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal does not mention %q: %v", want, err)
+		}
+	}
+
+	// A path: selector resolved among readable worktrees is exact, so it is
+	// allowed and still warns that discovery was incomplete.
+	plan, err := PrepareRemove(context.Background(), cfg, "path:"+target)
 	if err != nil {
-		t.Fatalf("PrepareRemove: %v", err)
+		t.Fatalf("PrepareRemove(path:): %v", err)
 	}
 	if len(plan.Warnings) != 1 {
 		t.Fatalf("warnings = %#v, want one", plan.Warnings)
@@ -330,6 +344,55 @@ esac
 	var projectErr ProjectError
 	if !errors.As(plan.Warnings[0], &projectErr) || projectErr.Project != "bad" {
 		t.Fatalf("warning = %v, want the unreadable project", plan.Warnings[0])
+	}
+}
+
+func TestRemovalIncompleteErrorBlocksPartialCandidateSets(t *testing.T) {
+	candidate := selector.Candidate{Path: "/wt/readable", SessionName: "repo/feat/auth"}
+	discoveryErr := Discovery{Errors: []ProjectError{{Project: "bad", Err: errors.New("cannot read")}}}
+	skipped := []string{"project repo: worktree /wt/missing (feat/auth) is unreadable and was skipped: missing"}
+
+	tests := []struct {
+		name       string
+		input      string
+		discovery  Discovery
+		warnings   []string
+		wantRefuse bool
+	}{
+		{"skipped worktree blocks a branch selector", "branch:feat/auth", Discovery{}, skipped, true},
+		{"skipped worktree blocks a bare selector", "repo/feat/auth", Discovery{}, skipped, true},
+		{"skipped worktree allows an explicit path", "path:/wt/readable", Discovery{}, skipped, false},
+		{"unreadable project blocks a branch selector", "branch:feat/auth", discoveryErr, nil, true},
+		{"unreadable project blocks active", "active", discoveryErr, nil, true},
+		{"unreadable project blocks a substring", "auth", discoveryErr, nil, true},
+		{"unreadable project allows exact identity", "repo/feat/auth", discoveryErr, nil, false},
+		{"unreadable project allows name", "name:repo/feat/auth", discoveryErr, nil, false},
+		{"unreadable project allows an explicit path", "path:/wt/readable", discoveryErr, nil, false},
+		{"complete discovery allows a branch selector", "branch:feat/auth", Discovery{}, nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := removalIncompleteError(tt.input, candidate, tt.discovery, tt.warnings)
+			if got := err != nil; got != tt.wantRefuse {
+				t.Fatalf("removalIncompleteError(%q) = %v, want refuse=%v", tt.input, err, tt.wantRefuse)
+			}
+			if err != nil && !strings.Contains(err.Error(), "path:<path>") {
+				t.Errorf("refusal does not suggest path:: %v", err)
+			}
+		})
+	}
+}
+
+func TestIsExplicitSelectionExpandsBareHomePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(home, "wt")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	candidate := selector.Candidate{Path: canonical(t, target), SessionName: "repo/main"}
+	if !isExplicitSelection("~/wt", candidate) {
+		t.Error("a bare ~/ path naming the candidate should be explicit")
 	}
 }
 
