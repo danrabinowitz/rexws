@@ -61,6 +61,7 @@ func newRootCmd() *cobra.Command {
 		newSwitchCmd(),
 		newNewCmd(),
 		newRmCmd(),
+		newCleanupCmd(),
 	)
 	return cmd
 }

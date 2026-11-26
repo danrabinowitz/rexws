@@ -147,6 +147,7 @@ and it currently requires Rex to be reachable.
 | `rexws switch <selector> [--window ...] [--client ...] [--json]` | Show the workstream's Rex session, creating it if needed; optionally select a window. |
 | `rexws status <selector> <stage> [--json]` | Set a workstream's workflow status, by ID or label. |
 | `rexws rm <selector> [--json]` | Close the session, remove the worktree, clear its metadata. |
+| `rexws cleanup [--project <name>] [--json] [--apply] [--force]` | Report every worktree and branch with a removal reason; remove only the provably safe set. |
 
 ### Selecting a workstream
 
@@ -232,6 +233,107 @@ Outside every registered worktree, `here` fails with exit code `4` rather than
 printing an empty result. A `--dir` that does not exist is ordinary bad input
 and exits `1`, with the flag and path named in the error.
 
+### Cleanup candidates
+
+`rexws cleanup` reports every worktree and every local branch that is not
+checked out in one, across all registered projects by default, with a stable
+reason for each. It changes no refs, worktrees, branches, or state unless
+`--apply` is passed, and
+`--project <name>` narrows the scan to one registered repository.
+
+The classification is the primary blocking reason. `branch_state` states the
+branch's relationship to the project's default branch independently, so a
+dirty worktree on a merged branch has `"classification": "dirty"` and
+`"branch_state": "merged"`.
+
+| Classification | Meaning | `--apply` | `--force` |
+| --- | --- | --- | --- |
+| `prunable` | The worktree directory is missing and Git marks the entry prunable. | Removes the bookkeeping with `git worktree prune`; the branch is left for a later run, matching the two-pass scripts. A missing directory Git did not mark prunable is reported but left alone. | Same. |
+| `merged` | The branch is an ancestor of the project's default branch and the worktree is clean. | Removes the worktree, then deletes the branch with `git branch -d` after the ancestry proof. | Same. |
+| `patch-equivalent` | Merging the branch into the default branch is a clean no-op, so its changes are already there by rebase or cherry-pick. A clean empty commit is a no-op and qualifies. | Removes the worktree, then deletes the branch with `git branch -D` after the merge-tree proof. | Same. |
+| `unmerged` | The branch has commits or changes that are not in the default branch. | Kept. | Removes after printing each commit that would be lost. |
+| `dirty` | The worktree has modified, staged, untracked, or ignored paths. | Kept. | Removes after printing every status line that would be lost. |
+| `protected` | The branch is `main`, `master`, `develop`, `HEAD`, or the project's default branch; or this is the main checkout. | Never removed. | Never removed. |
+| `locked` | The worktree is locked. | Never removed. | Never removed. |
+| `detached` | The worktree has a detached HEAD. | Never removed. | Never removed. |
+| `active` | A live Rex session is labeled `<project>/<branch>`. | Never removed. | Never removed. |
+| `unknown` | Git reported neither a branch nor a detached state, or the branch proof could not be evaluated (no common ancestor or a Git error). | Never removed. | Never removed. |
+
+Safety rules:
+
+- A preview (`cleanup` or `cleanup --json`) changes no refs, worktrees,
+  branches, or `state.json`, and kills no session. It reads worktree and branch
+  listings, `merge-base`, `git status` (including ignored paths), `log`, Rex
+  sessions, and runs a merge-tree proof. The proof can write unreachable tree
+  objects into Git's object database; Git GC reclaims them, and no ref or
+  worktree points at them.
+- Patch equivalence uses `git merge-tree --write-tree` (Git 2.38 or newer)
+  rather than `git cherry`: it requires a clean merge whose result is exactly
+  the default branch's tree. That rejects an evil merge with unique
+  conflict-resolution content and a patch that was later reverted upstream,
+  both of which cherry would call equivalent.
+- `--apply` removes only `prunable`, `merged`-and-clean, and
+  `patch-equivalent` items. `--force` additionally permits `dirty` and
+  `unmerged` items, and nothing else. Protected, locked, detached, and active
+  items are never removed, with or without `--force`.
+- Before each removal, apply re-lists worktrees and re-lists Rex again
+  immediately before the mutation loop, re-reads status including ignored
+  paths, checks the branch SHA, and re-runs the ancestry or merge-tree proof.
+  If anything changed since the plan, the item is kept and reported failed;
+  rerun `cleanup`.
+- Merged branches try `git branch -d`; if the main checkout's HEAD does not
+  contain the merge, apply re-proves the base-relative ancestry and falls back
+  to `-D`. Patch-equivalent branches and explicitly forced unmerged branches use
+  `-D` only after the same re-proof, including a final re-check after the
+  worktree is removed.
+- Before a forced removal, `cleanup --apply --force` prints each item, its
+  changed, untracked, or ignored paths, and its commits not in the default
+  branch to stderr. `cleanup --force` without `--apply` prints the same
+  prospective loss but changes nothing. With `--json`, stdout stays a single
+  parseable document. A later re-check can still refuse the removal, so a LOSS
+  line describes the plan, not a completed deletion.
+- Ignored files count as dirty. `git worktree remove` deletes the whole
+  directory, including ignored content such as a local `.env`, so a worktree
+  holding only ignored files requires `--force` and names those paths in LOSS.
+- Active sessions are checked through Rex. A preview continues with a warning
+  when Rex cannot be reached; `--apply` refuses, because it cannot prove no
+  session is active. `session_id` is the first match when Rex has duplicate
+  labels; the detail names every matching session ID.
+- The default branch is `origin/HEAD`'s target (its local branch when present,
+  otherwise the remote-tracking ref), then local `main`, then local `master`,
+  then `origin/main` or `origin/master`. A repository with none of these is
+  reported as a project error and is not touched. The local default is
+  preferred over a newer remote-tracking branch, so a branch merged only
+  upstream can be reported `unmerged`; that is conservative and never removes
+  it.
+- The scan is sequential per worktree and branch: each item costs a few Git
+  calls (`merge-base`, `merge-tree`, `log`, `status`). Cost grows linearly with
+  the number of items, which is why apply re-verification favors correctness
+  over batching.
+- Worktree removal also clears that path's `state.json` entry. Branch-only
+  deletions have no state.
+
+`--json` emits a `schema_version: 1` document. The version is provisional until
+`S2 · Frozen JSON contract`; the shape is fixed because every item carries
+every key. Projects are sorted by name and items by branch, kind, and path, so
+two reports of the same repositories are byte-identical. Every item carries
+`project`, `kind` (`worktree` or `branch`), `path`, `branch`, `head`,
+`classification`, `branch_state`, `safe`, `removable`, `requires_force`,
+`dirty`, `locked`, `detached`, `active_session`, `session_id`, `action`,
+`result`, `detail`, `loss`, and `error`. Empty values are `""`, `false`, or
+`null`; keys are never omitted. `loss` is `null` when nothing would be lost,
+or an object whose `dirty_files` and `commits` are always arrays.
+`totals.by_classification` always includes every classification key, including
+zero counts. `action` is what apply would do; `result` is empty in a preview
+and `kept`, `removed`, or `failed` after apply; `error` is empty unless an item
+was kept or failed during apply. This is the candidate shape for the frozen
+contract; the other commands' JSON remains unfrozen.
+
+Cleanup is deliberately not scheduled and does not kill Rex sessions. It also
+never deletes a branch it cannot prove merged or patch-equivalent without
+`--force`, and even `--force` will not touch a protected, locked, detached, or
+active item.
+
 ### TUI
 
 Run `rexws` with no arguments, or `rexws tui`, to open the interactive
@@ -248,8 +350,10 @@ for the full key map and `s` to change a workstream's status.
 See `TUI-UX.md` for the full UX design.
 
 Every command that reports data accepts `--json` for scripts and future
-launchers. The JSON shapes are usable but **not frozen** — there is no
-`schema_version` yet, so treat them as unstable.
+launchers. Most JSON shapes are usable but **not frozen** — they have no
+`schema_version` yet, so treat them as unstable. `cleanup` is the provisional
+exception: it emits `"schema_version": 1`, carries a fixed key set, sorts its
+projects and items, and is the candidate shape for the frozen contract.
 
 ---
 
@@ -383,8 +487,9 @@ Stated now so they stop being relitigated:
   sessions.
 - **No PR/CI enrichment in core.** Those are satellite ideas, not features of
   this binary.
-- **No automatic branch deletion.** `rm` removes the worktree and leaves the
-  branch.
+- **No automatic or scheduled branch deletion.** `rm` removes the worktree and
+  leaves the branch; `cleanup --apply` deletes only branches proven merged or
+  patch-equivalent, or explicitly forced after naming the loss.
 - **No Kanban view, mouse support, or configurable keybindings.**
 - **No window create/rename/close from `rexws`.**
 - **No session adoption yet.** Matching is exact on `<project>/<branch>`, so
@@ -436,6 +541,8 @@ may change without migration support.
   `<project>/<branch>`, `branch:`, `path:`, `name:`, `active`/`current`, and
   unique case-insensitive substrings; `here` resolves the workstream containing
   the current directory.
+- `cleanup`: a preview-first, cross-project classification of every worktree
+  and branch, with a safe `--apply` set and a force path that names its loss.
 - The interactive TUI (`rexws` or `rexws tui`): workflow-status groups, an
   expandable workstream → window hierarchy, substring search, status switching,
   and live Rex updates.
@@ -451,7 +558,8 @@ may change without migration support.
   detector, on Linux; Windows is untested.
 - Verified against Rex `0.1.0-preview.25` (API revision 24). There is no Rex
   version check, so a preview drift can break the adapter.
-- The JSON contract is not frozen and has no `schema_version`.
+- The JSON contract is not frozen. `cleanup` emits provisional
+  `schema_version: 1`; the other commands have no `schema_version` yet.
 
 See `ROADMAP.md` for what is committed next, `SPEC.md` for the current design,
 `IDEAS.md` for the unranked idea bank, and `TUI-UX.md` for the TUI UX.

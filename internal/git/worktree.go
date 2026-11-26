@@ -148,11 +148,11 @@ func WorktreesForBranch(worktrees []Worktree, branch string) []Worktree {
 
 // IsDirty reports whether the worktree has uncommitted or untracked changes.
 func IsDirty(ctx context.Context, worktreePath string) (bool, error) {
-	out, err := runGit(ctx, worktreePath, "status", "--porcelain")
+	lines, err := StatusLines(ctx, worktreePath)
 	if err != nil {
 		return false, err
 	}
-	return len(bytes.TrimSpace(out)) > 0, nil
+	return len(lines) > 0, nil
 }
 
 func runGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
