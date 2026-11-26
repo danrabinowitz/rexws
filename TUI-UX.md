@@ -248,21 +248,36 @@ If no workstreams exist, show the header and:
   - Truncate the filter query to 12 cells; keep the chip.
   - A health token is always shown in full; it is never truncated.
   - Hide the window count on parent rows.
-  - Hide the app name on child rows before truncating the window label.
+  - Hide the app name only when the label cell would fall below 12 cells; at
+    supported widths it stays visible and right-aligns before the badge rail.
   - Limit the parent badge to 18 cells; limit the child badge to 18 cells.
-  - Project max 10 cells; branch keeps at least 10; window label at least 12.
+  - Project max 10 cells; branch flex (21 cells at 60); window label at least 12.
 - At 80+ columns:
   - Full header counts, still whole or absent.
   - The filter query is capped at 12 cells whenever a health token is present.
   - Parent badge max 28 cells; project max 12; branch flex.
   - Show window counts and app names.
+  - The footer status suffix is right-aligned; rows keep the fixed 8-cell
+    count rail.
+- At 120+ columns:
+  - The whole frame (header, separator, rows, banner, footer) caps at 120
+    cells; above 120 it is centered and the extra columns are margins.
+  - Project grows to 16 cells; the branch stays flex.
+  - Header counts right-align at the content edge; every other line is the
+    same 120-cell layout.
+  - Markers occupy a dedicated two-cell cell before the shared badge rail.
 - Overflow is sacrificed in the header in this order: counts, then query width;
   the health token is never sacrificed.
 - Never wrap a row. Use `…` and `lipgloss.Width` on sanitized text.
-- Footer priority: `Enter`, expand/back, filter, help. Add
-  `s`/`n`/`d`/`r`/`q` only when they fit.
+- Footer priority: `Enter`, expand, filter, help. At 60–79 the four-key set is
+  joined with single spaces; at 80+ it is joined with two spaces and adds
+  `[←] back` before the optional keys. Add `s`/`n`/`d`/`r`/`q` only when they
+  fit and only at 80+.
 - When a filter is active, replace the `[/] filter` footer slot with
-  `[Esc] clear filter`.
+  `[Esc] clear filter` (`[Esc] clear` at 60–79).
+- At 60–79 a crowded pending status (`saving status…`) keeps its label. If it
+  would not fit, `[?] help` is dropped before the status, with or without an
+  active filter.
 
 Compact 60-column shape:
 
@@ -679,8 +694,8 @@ If Rex becomes unavailable after data was loaded:
 - Agent badges are text-only in v1: use the option-A formatter for parents and
   per-window summaries for children. Do not claim symbols that are not
   implemented.
-- Row markers are text-only, one cell each, at the start of the agent-badge
-  cell on the **parent workstream row**. Truncation keeps the prefix.
+- Row markers are text-only in a dedicated two-cell cell before the shared
+  badge rail on the **parent workstream row**. Truncation keeps the cell whole.
 
   | Marker | Meaning |
   | --- | --- |
@@ -698,20 +713,26 @@ If Rex becomes unavailable after data was loaded:
 - Expand state: `▸`/`▾`; context parent: `↳`; active window: `*` plus bold.
 - Group header: `▌` static marker.
 - Match highlight: bold + underline always; accent color when available. No
-  color-only distinction.
+  color-only distinction. Limitation (pre-existing): the Ascii/`NO_COLOR`
+  profile used by the tests strips bold and underline as well as color, so a
+  match may not be visually distinct in that profile; the filter chip and
+  context-row cues still identify the filtered view.
 - Truncate with `…`; never wrap.
 - `NO_COLOR` and monochrome terminals remain usable.
 - The footer is always visible and mode-specific.
-- Help is a scrollable overlay; it must fit at 18 rows. It lists active
-  persistent warnings in full (wrapped), including each warning's detail lines
-  (for example, the affected sessions or duplicated labels), then the marker
-  legend, the `x` binding, and the key map.
+- Help is a bordered, scrollable panel (56/64/88 cells at 60/80/120) that fits
+  at 18 rows. It lists active persistent warnings in full (wrapped), including
+  each warning's detail lines (for example, the affected sessions or duplicated
+  labels), then the marker legend, the `x` binding, and the key map. When the
+  body is the full 15 rows at 60×18 (no banner), the first 13 content rows show
+  the marker section and every key group; a warning banner reduces the body and
+  the remaining rows scroll.
 - Minimum size 60×18; smaller shows a centered `terminal too small` message.
 
 ## 11. Technical architecture
 
 - Add `github.com/charmbracelet/bubbletea`, `lipgloss`, and `bubbles`
-  (`textinput`, `viewport`, `key`, `help`).
+  (`textinput`, `viewport`). The help panel is rendered directly.
 - Do not use `bubbles/list` for the tree; it is flat and its filter does not
   preserve hierarchy.
 - Build a custom `[]Row` view model:
@@ -772,7 +793,8 @@ If Rex becomes unavailable after data was loaded:
 - [ ] Double `Enter` cannot create duplicate sessions; mutating actions are
   single-flight.
 - [ ] Rex-derived control characters cannot reach the terminal or corrupt width.
-- [ ] The layout remains usable at 60×18 and never splits into panes.
+- [ ] The layout remains usable at 60×18 and never splits into panes. Above
+  120 columns the frame caps at 120 cells, centers, and never overflows.
 - [ ] `PgUp`/`PgDn` move the selection, and the cursor is always visible.
 - [ ] If the selected row disappears, selection moves by the defined algorithm;
   with no selection, row actions are no-ops.
@@ -798,21 +820,33 @@ If Rex becomes unavailable after data was loaded:
   count.
 - [ ] At 60 columns the worst-case header (long health token plus a capped
   filter query) is at most 60 cells, never truncates health, and keeps counts
-  whole or absent.
+  whole or absent. At 80 columns a long query drops the counts chip before the
+  query is truncated.
+- [ ] Semantic tokens resolve to the documented ANSI-16, 256-color, or
+  truecolor value for the active profile and light/dark background; ANSI-16
+  selection uses reverse.
+- [ ] Help is a bordered panel at 56/64/88 cells for 60/80/120 (and centered in
+  the 120-cell block at 200). With the full 15-row body at 60×18 (no banner),
+  its first 13 content rows include the marker legend and every key group; a
+  warning banner reduces the body and the rest scrolls.
 - [ ] Long banner messages at 60 columns always retain `+N more` and every line
   stays within 60 cells.
 - [ ] The rendered screen is exactly the terminal height before and after a
   notice expires.
 - [ ] Under ASCII/`NO_COLOR`, `!` and `‖` carry their meaning with no color or
-  ANSI escapes.
+  ANSI escapes. `REXWS_ASCII` (or a non-UTF-8 locale) selects the ASCII glyph
+  set for every structural glyph, including expansion, groups, and rules.
 - [ ] Control characters in labels, warnings, or errors cannot reach the
   banner, header, or help, and cannot inject markers.
 - [ ] No new keybindings, no mouse, unchanged footer priority, unchanged 60×18
   minimum, no wrapped rows.
 - [ ] Unit tests cover visibility, sticky expansion, match spans, the key
   reducer, the cursor algorithm, sanitization, per-window badges, rendering at
-  60/80 columns, stream health and backoff, ambiguity in both directions, and
-  banner/notice precedence.
+  60/80/120/200 columns under fixed ASCII and truecolor profiles, the ANSI-16
+  and 256-color token matrix for both backgrounds, the 120-cell cap and column
+  grid, marker cells in both glyph sets, help completeness, middle truncation,
+  the ASCII glyph fallback on every screen, stream health and backoff, ambiguity
+  in both directions, and banner/notice precedence.
 
 ## 13. Resolved decisions
 

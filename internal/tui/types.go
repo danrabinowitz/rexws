@@ -63,18 +63,21 @@ type Row struct {
 	GroupSpans []Span
 
 	// Workstream row.
-	Path         string
-	SessionName  string
-	Project      string
-	Branch       string
-	Badge        string
-	WindowCount  string
-	HasWindows   bool
-	Expanded     bool
-	Matched      bool
-	ContextMatch bool
-	ProjectSpans []Span
-	BranchSpans  []Span
+	Path            string
+	SessionName     string
+	Project         string
+	Branch          string
+	Badge           string
+	AgentState      core.AgentState
+	MarkerAmbiguous bool
+	MarkerPaused    bool
+	WindowCount     string
+	HasWindows      bool
+	Expanded        bool
+	Matched         bool
+	ContextMatch    bool
+	ProjectSpans    []Span
+	BranchSpans     []Span
 
 	// Window row.
 	WindowID      string

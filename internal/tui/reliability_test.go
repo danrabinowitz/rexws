@@ -411,8 +411,8 @@ func TestPerSessionPauseDebouncesThenClearsOnConnect(t *testing.T) {
 		t.Errorf("header token = %q", token)
 	}
 	row, ok := rowByKey(m.state.rows, RowKey{Kind: RowWorkstream, ID: "/wt/rexws"})
-	if !ok || !strings.Contains(row.Badge, "‖") {
-		t.Errorf("row badge = %q", row.Badge)
+	if !ok || !row.MarkerPaused {
+		t.Errorf("row marker = %+v", row)
 	}
 
 	// A real connect clears the pause immediately.
@@ -421,8 +421,8 @@ func TestPerSessionPauseDebouncesThenClearsOnConnect(t *testing.T) {
 		t.Error("connect did not clear the visible pause")
 	}
 	row, _ = rowByKey(m.state.rows, RowKey{Kind: RowWorkstream, ID: "/wt/rexws"})
-	if strings.Contains(row.Badge, "‖") {
-		t.Errorf("row kept the marker after connect: %q", row.Badge)
+	if row.MarkerPaused {
+		t.Errorf("row kept the marker after connect: %+v", row)
 	}
 }
 
@@ -662,12 +662,12 @@ func TestHandleLoadedDetectsAmbiguity(t *testing.T) {
 		t.Errorf("ambiguous labels = %#v", m.state.ambiguousLabels)
 	}
 	row, ok := rowByKey(m.state.rows, RowKey{Kind: RowWorkstream, ID: "/wt/rexws"})
-	if !ok || !strings.Contains(row.Badge, "!") {
-		t.Errorf("bound row badge = %q", row.Badge)
+	if !ok || !row.MarkerAmbiguous {
+		t.Errorf("bound row marker = %+v", row)
 	}
 	row, _ = rowByKey(m.state.rows, RowKey{Kind: RowWorkstream, ID: "/wt/dosido"})
-	if strings.Contains(row.Badge, "!") {
-		t.Errorf("unbound row was marked: %q", row.Badge)
+	if row.MarkerAmbiguous {
+		t.Errorf("unbound row was marked: %+v", row)
 	}
 	found := false
 	for _, n := range m.state.notices {

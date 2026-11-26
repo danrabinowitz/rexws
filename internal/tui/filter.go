@@ -130,32 +130,31 @@ func workstreamRow(ws core.Workstream, parentMatch, context, expanded bool, visi
 	if opts.BadgeUnknown {
 		badge = "?"
 	}
-	// Markers sit inside the badge cell so truncation keeps the prefix. The
-	// parent row carries them; windows inherit the pause without a marker.
+	// Markers occupy their own two-cell cell on the parent row; windows inherit
+	// the pause without a marker (TUI-DESIGN.md §1.3, §3.2).
 	ambiguous := ws.RexSessionID != "" &&
 		(opts.AmbiguousSessions[ws.RexSessionID] || opts.AmbiguousLabels[ws.SessionName])
 	paused := !opts.SuppressPauseMarker && ws.RexSessionID != "" && opts.PausedSessions[ws.RexSessionID]
-	marker := ""
-	if ambiguous {
-		marker += "!"
+	state := workstreamHighestState(ws)
+	if opts.BadgeUnknown {
+		state = core.AgentUnknown
 	}
-	if paused {
-		marker += "‖"
-	}
-	badge = marker + badge
 	row := Row{
-		Kind:         RowWorkstream,
-		Key:          RowKey{Kind: RowWorkstream, ID: ws.Path},
-		Depth:        1,
-		Path:         ws.Path,
-		SessionName:  render.Sanitize(ws.SessionName),
-		Project:      project,
-		Branch:       branch,
-		Badge:        badge,
-		HasWindows:   len(ws.Windows) > 0,
-		Expanded:     expanded,
-		Matched:      active && parentMatch,
-		ContextMatch: context,
+		Kind:            RowWorkstream,
+		Key:             RowKey{Kind: RowWorkstream, ID: ws.Path},
+		Depth:           1,
+		Path:            ws.Path,
+		SessionName:     render.Sanitize(ws.SessionName),
+		Project:         project,
+		Branch:          branch,
+		Badge:           badge,
+		AgentState:      state,
+		MarkerAmbiguous: ambiguous,
+		MarkerPaused:    paused,
+		HasWindows:      len(ws.Windows) > 0,
+		Expanded:        expanded,
+		Matched:         active && parentMatch,
+		ContextMatch:    context,
 	}
 	if active {
 		row.ProjectSpans = matchSpans(project, query)
@@ -179,6 +178,13 @@ func windowRow(ws core.Workstream, window core.Window, labelCounts map[string]in
 	if badge == "" {
 		badge = "—"
 	}
+	state := windowHighestState(ws, window.ID)
+	if badgeUnknown {
+		state = core.AgentUnknown
+	}
+	if badge == "—" {
+		state = core.AgentStopped
+	}
 	row := Row{
 		Kind:          RowWindow,
 		Key:           RowKey{Kind: RowWindow, ID: window.ID},
@@ -191,6 +197,7 @@ func windowRow(ws core.Workstream, window core.Window, labelCounts map[string]in
 		WindowLabel:   label,
 		WindowApp:     app,
 		Badge:         badge,
+		AgentState:    state,
 		WindowActive:  window.Active,
 		WindowMatched: matched,
 	}
@@ -201,6 +208,48 @@ func windowRow(ws core.Workstream, window core.Window, labelCounts map[string]in
 		}
 	}
 	return row
+}
+
+// workstreamHighestState mirrors render.Default.Format's ordering, including
+// unknown agents, so the whole badge takes the color of its first label.
+func workstreamHighestState(ws core.Workstream) core.AgentState {
+	switch ws.AgentState {
+	case core.AgentStopped:
+		return core.AgentStopped
+	case core.AgentUnknown:
+		if len(ws.Agents) == 0 {
+			return core.AgentUnknown
+		}
+	}
+	if len(ws.Agents) == 0 {
+		return core.AgentIdle
+	}
+	return highestAgentState(ws.Agents, "")
+}
+
+// windowHighestState returns the window's highest-severity agent state, so the
+// whole badge can take that role's color.
+func windowHighestState(ws core.Workstream, windowID string) core.AgentState {
+	return highestAgentState(ws.Agents, windowID)
+}
+
+func highestAgentState(agents []core.Agent, windowID string) core.AgentState {
+	best := core.AgentState("")
+	bestSeverity := -2
+	for _, agent := range agents {
+		if windowID != "" && agent.WindowID != windowID {
+			continue
+		}
+		state := agent.State
+		if state == "" {
+			state = core.AgentUnknown
+		}
+		if severity := state.Severity(); severity > bestSeverity {
+			bestSeverity = severity
+			best = state
+		}
+	}
+	return best
 }
 
 // windowCountText follows the three cases in TUI-UX §3.2.

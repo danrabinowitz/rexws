@@ -16,6 +16,9 @@ import (
 
 func TestMain(m *testing.M) {
 	lipgloss.SetColorProfile(termenv.Ascii)
+	// Pin the glyph set so tests do not depend on the host locale; tests that
+	// exercise the fallback set REXWS_ASCII themselves.
+	_ = os.Setenv("REXWS_ASCII", "0")
 	os.Exit(m.Run())
 }
 
@@ -246,7 +249,7 @@ func TestRenderStatusModal(t *testing.T) {
 	s, _ = Reduce(s, runeKey('s'))
 	out := Render(s)
 	assertScreen(t, out, 80, 24)
-	for _, want := range []string{"Status for rexws/m1-m2-core-rex", "In Progress (current)", "Blocked", "[1-9] shortcut"} {
+	for _, want := range []string{"╭─ Status", "rexws/m1-m2-core-rex", "In Progress (current)", "Blocked", "[1-9] shortcut"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status modal missing %q:\n%s", want, out)
 		}

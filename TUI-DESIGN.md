@@ -102,7 +102,7 @@ Defaults for the five built-in IDs; custom IDs get `auto`:
 
 - `in_progress` → accent blue. `blocked` → error red. `in_review` → purple. `ready` → green. `done` → muted.
 - `auto` for a custom ID: deterministic pick from `[accent, in_review purple, info cyan, agent.unknown amber]` by FNV hash of the ID. Never blocked-red or ready-green.
-- Before #13, the same map is applied by ID in the TUI; unknown IDs use muted.
+- In #12, IDs outside the five built-ins render muted; the deterministic hash resolver above is #13’s extension.
 - Group header: `▌` in the status color; label bold `text`; count `muted`; optional icon in the status color before the label.
 - The parent row never repeats the status (`TUI-UX.md:100-102`). The status selector shows the same icon/color beside each label.
 - Color is redundant: the label is always present, and the group header’s `▌` is a static shape.
@@ -189,7 +189,7 @@ All cells are fixed or flex per the table; every row is padded to `W` and never 
 | tree | 2 | 2 | 2 | `▸ `, `▾ `, `↳ `, or `  `; always reserved, so stopped rows align |
 | project | 10 | 12 | 16 | truncated with `…` |
 | gap | 2 | 2 | 2 | |
-| branch | flex | flex | flex | `B = W - 13 - P - R - C`; fills remaining (19 at 60/80, 55 at 120) |
+| branch | flex | flex | flex | `B = W - 11 - P - R - C`, minus the 2-cell count gap when present; fills remaining (21 at 60, 19 at 80, 55 at 120) |
 | gap | 1 | 1 | 1 | |
 | marker | 2 | 2 | 2 | `  `, `! `, `‖ `, `!‖` |
 | gap | 1 | 1 | 1 | |
@@ -256,10 +256,10 @@ Indent 2, bullet `•`, active `*` + bold label, label cell `max(12, min(longest
 
 | Width | Content | Project | Branch | Badge | Count | App | Footer |
 |---|---|---|---|---|---|---|---|
-| 60–79 | 60–79 | 10 | flex (~19) | 18 | hidden | shown if label ≥12 | single space; `[Esc] clear`; 4 priority keys |
-| 80–119 | 80–119 | 12 | flex (~19) | 28 | 8 rail | shown | two spaces; optional keys |
-| 120 | 120 | 16 | flex (~55) | 28 | 8 rail | right-aligned flex | counts right; status right |
-| 200 | 120 centered | 16 | ~55 | 28 | 8 rail | right-aligned flex | identical to 120; 40-cell margins |
+| 60–79 | 60–79 | 10 | flex (21) | 18 | hidden | shown (label ≥12) | single space; `[Esc] clear`; 4 priority keys |
+| 80–119 | 80–119 | 12 | flex (19) | 28 | 8 rail | shown | two spaces; optional keys |
+| 120 | 120 | 16 | flex (55) | 28 | 8 rail | right-aligned flex | counts right; status right |
+| 200 | 120 centered | 16 | 55 | 28 | 8 rail | right-aligned flex | identical to 120; 40-cell margins |
 
 No per-status icons are required for hierarchy; the group label is the hierarchy. Icons are an optional accent.
 
@@ -554,6 +554,8 @@ At 200: same block with margins. Banner `warning` + `!`; row marker `!`. For two
 
 The help is a bordered, scrollable panel: body-height box, 13 visible content rows at 18×18; more content scrolls. The header and footer remain. At 60/80/120 the box is 56/64/88 cells wide, centered in the content block.
 
+Implemented order follows `TUI-UX.md` §10: warnings, then the marker legend and `x` binding, then the key map. The sample frames below list Keys before Markers for compactness; the content and panel geometry are the same.
+
 **60 columns**
 ```text
   ╭─ Help ───────────────────────────────────────────╮
@@ -717,6 +719,7 @@ The title and question are `danger` + bold; the destructive verb and the two-lin
 | `·` | `-` | header count separator |
 | `─` | `-` | rule |
 | `╭╮╰╯│` | `+ + + + |` | modal borders |
+| `↑↓←→` | `^v<>` | key labels in footers and help |
 | `! ? * > [ ]` | unchanged | already ASCII |
 
 Mechanism: `REXWS_ASCII=1` forces the ASCII set; otherwise auto-detect a UTF-8 locale (`LC_ALL`, then `LC_CTYPE`, then `LANG` containing `UTF-8`/`utf8`). If unset, default to Unicode (current behavior). The glyph set is a small struct used by every renderer; tests force both. `‖` is 1 cell in `lipgloss.Width` (verified), so the 2-cell marker cell holds `!‖` and the ASCII `!|`.
