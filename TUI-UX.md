@@ -31,7 +31,7 @@ Non-goals for this milestone:
 - Window creation/renaming/closing from rexws (Rex CLI owns those).
 - Multiple sessions per workstream.
 - Fuzzy ranking in v1 (substring first; fuzzy can be added later).
-- Per-status colors/icons (requires a config-schema change; deferred).
+- Per-status colors/icons (implemented in #13; see `TUI-DESIGN.md` §2.3).
 - Automatic Rex session reordering.
 - Sticky group headers.
 - An agent message/title detail pane.
@@ -954,7 +954,7 @@ If Rex becomes unavailable after data was loaded:
 - Group labels/IDs are searchable.
 - Agent states/details are matched per agent.
 - Matches are always bold + underlined; accent color is additive.
-- Status colors/icons are deferred.
+- Status colors/icons are implemented in #13; see `TUI-DESIGN.md` §8.2.
 - Fuzzy search is deferred.
 - Minimum size is 60×18.
 - Ambiguity is warned in both directions; the first session with a label stays
@@ -989,6 +989,7 @@ statuses as a fixed enum rather than the configurable `statuses` list.
 - Automatic Rex session reordering.
 - Sticky group headers.
 - Fuzzy ranking in v1.
-- Per-status colors/icons.
+- Per-status colors/icons beyond the optional `color`/`icon` fields on
+  configured statuses (implemented in #13; see `TUI-DESIGN.md` §8.2).
 - Agent message/title detail panes.
 - `g`/`G`, `Home`/`End`.

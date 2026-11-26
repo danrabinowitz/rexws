@@ -39,6 +39,11 @@ type Config struct {
 	Statuses        []StatusDef         `json:"statuses"`
 	DefaultStatus   Status              `json:"default_status"`
 	Projects        []Project           `json:"projects"`
+
+	// Warnings reports cosmetic problems found while loading, such as an
+	// invalid status color/icon or a low-contrast fixed color. They never block
+	// the load and are not persisted.
+	Warnings []string `json:"-"`
 }
 
 // Default returns the built-in configuration used when no config.json exists.
@@ -82,6 +87,7 @@ func Load() (Config, error) {
 		cfg.Providers = Default().Providers
 	}
 	cfg.applyStatusDefaults()
+	cfg.collectStyleWarnings()
 	if err := cfg.Validate(); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -138,6 +144,7 @@ func (c Config) Validate() error {
 // RegisterProject adds a repository to the configuration. It returns the
 // stored project and false when the path is already registered.
 func (c *Config) RegisterProject(path, name, provider, worktreeRoot string) (Project, bool, error) {
+	c.collectStyleWarnings()
 	path = filepath.Clean(path)
 	for _, p := range c.Projects {
 		if p.Path == path {

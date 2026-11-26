@@ -52,6 +52,58 @@ func TestStoppedWorkstreamEnterCreatesAndExpands(t *testing.T) {
 	}
 }
 
+func TestHandleLoadedSurfacesConfigWarnings(t *testing.T) {
+	fakeRexEvents(t, `{"type":"server_connected","payload":{}}`, `{"type":"server_connected","payload":{}}`)
+	m := NewModel()
+	defer m.Close()
+	m.state = testState(t)
+
+	_, _ = m.handleLoaded(loadedMsg{
+		cfg:            config.Default(),
+		workstreams:    sampleWorkstreams(),
+		rexAvailable:   true,
+		configWarnings: []string{`status "in_progress": invalid color "chartreuse"; using auto`},
+	})
+
+	found := false
+	for _, notice := range m.state.persistentNotices(time.Now()) {
+		if !strings.Contains(notice.text, "invalid color") {
+			continue
+		}
+		found = true
+		if notice.priority != warningConfig {
+			t.Errorf("config warning priority = %d, want %d", notice.priority, warningConfig)
+		}
+	}
+	if !found {
+		t.Fatalf("config warning is not persisted: %#v", m.state.notices)
+	}
+	shown, _, ok := m.state.bannerNotice(time.Now())
+	if !ok || !strings.Contains(shown.text, "invalid color") {
+		t.Errorf("banner = %#v, %v", shown, ok)
+	}
+}
+
+func TestConfigWarningRanksBelowSession(t *testing.T) {
+	fakeRexEvents(t, `{"type":"server_connected","payload":{}}`, `{"type":"server_connected","payload":{}}`)
+	m := NewModel()
+	defer m.Close()
+	m.state = testState(t)
+
+	_, _ = m.handleLoaded(loadedMsg{
+		cfg:             config.Default(),
+		workstreams:     sampleWorkstreams(),
+		rexAvailable:    true,
+		configWarnings:  []string{"config problem"},
+		sessionWarnings: []string{"session problem"},
+	})
+
+	shown, _, ok := m.state.bannerNotice(time.Now())
+	if !ok || !strings.Contains(shown.text, "session problem") {
+		t.Errorf("banner = %#v, %v; want the session warning first", shown, ok)
+	}
+}
+
 func TestHandleLoadedPreservesFilterExpansionAndCursor(t *testing.T) {
 	fakeRexEvents(t, `{"type":"server_connected","payload":{}}`, `{"type":"server_connected","payload":{}}`)
 	m := NewModel()

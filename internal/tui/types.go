@@ -63,6 +63,8 @@ type Row struct {
 	GroupID    config.Status
 	GroupLabel string
 	GroupCount string
+	GroupColor string
+	GroupIcon  string
 	GroupSpans []Span
 
 	// Workstream row.

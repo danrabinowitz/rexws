@@ -122,7 +122,7 @@ pinned hash.
 | --- | --- | --- | --- |
 | `schema_version` | integer | always | `1`. |
 | `workstreams` | array of `Workstream` | always | Sorted by project, then attached worktrees before detached, then branch. |
-| `warnings` | array of string | optional | Omitted when empty. A Rex failure is a warning, not an error. Worktrees skipped because their path could not be read are also warnings and name their project and path. |
+| `warnings` | array of string | optional | Omitted when empty. A Rex failure is a warning, not an error. Worktrees skipped because their path could not be read are also warnings and name their project and path. Config warnings for invalid status styles or low-contrast fixed colors are included too. |
 
 ### `rexws status --json`
 

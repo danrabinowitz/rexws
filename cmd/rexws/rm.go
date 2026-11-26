@@ -10,7 +10,6 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
-	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/ops"
 	"github.com/danrabinowitz/rexws/internal/render"
 )
@@ -70,7 +69,7 @@ func newRmCmd() *cobra.Command {
 				return errors.New("refusing forced removal with --json without confirmation; rerun with --force --yes")
 			}
 
-			cfg, err := config.Load()
+			cfg, err := loadConfig(cmd)
 			if err != nil {
 				return err
 			}

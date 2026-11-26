@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"hash/fnv"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -166,10 +168,16 @@ func (t theme) selection() lipgloss.Style {
 	return lipgloss.NewStyle().Bold(true).Background(t.resolve(tokSelectionBG))
 }
 
-// Status returns the group accent for a workflow status. For #12 an ID outside
-// the five built-ins is muted; #13 owns configurable/custom status colors.
+// Status returns the group accent for a workflow status. Built-in IDs use the
+// §2.2 map; a custom ID gets a deterministic hash color.
 func (t theme) Status(id config.Status) lipgloss.Style {
 	return t.style(statusToken(id))
+}
+
+// StatusDef returns the group accent for one configured status. A configured
+// color wins over both the built-in map and the deterministic custom hash.
+func (t theme) StatusDef(def config.StatusDef) lipgloss.Style {
+	return t.style(statusTokenFor(def))
 }
 
 func statusToken(id config.Status) colorToken {
@@ -185,8 +193,53 @@ func statusToken(id config.Status) colorToken {
 	case config.StatusDone:
 		return tokMuted
 	default:
-		return tokMuted
+		return customStatusToken(id)
 	}
+}
+
+func statusTokenFor(def config.StatusDef) colorToken {
+	if token, ok := configuredStatusToken(def.Color); ok {
+		return token
+	}
+	return statusToken(def.ID)
+}
+
+// configuredStatusToken resolves a validated color setting. It returns false
+// for auto/empty and for any value the config grammar does not accept, so the
+// caller falls back to the status ID.
+func configuredStatusToken(value string) (colorToken, bool) {
+	normalized, ok := config.ParseStatusColor(value)
+	if !ok || normalized == "" || normalized == config.ColorAuto {
+		return colorToken{}, false
+	}
+	if light, dark, ok := config.StatusColorANSIIndices(normalized); ok {
+		return fixedColorToken(strconv.Itoa(light), strconv.Itoa(dark)), true
+	}
+	if index, found := strings.CutPrefix(normalized, "ansi256:"); found {
+		return fixedColorToken(index, index), true
+	}
+	return fixedColorToken(normalized, normalized), true
+}
+
+// fixedColorToken uses the same value for every profile and background. Hex
+// values degrade to 256/ANSI colors through termenv; ANSI indices stay in the
+// terminal's own palette.
+func fixedColorToken(light, dark string) colorToken {
+	return colorToken{
+		ansiLight: light, ansiDark: dark,
+		c256Light: light, c256Dark: dark,
+		tcLight: light, tcDark: dark,
+	}
+}
+
+// customStatusToken picks a reserved hue from [accent, in_review purple, info
+// cyan, agent.unknown amber] by a stable FNV hash. It never returns the
+// blocked-red or ready-green tokens.
+func customStatusToken(id config.Status) colorToken {
+	palette := [...]colorToken{tokAccent, tokInReview, tokInfo, tokAgentUnknown}
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(id))
+	return palette[hash.Sum32()%uint32(len(palette))]
 }
 
 // Agent returns the aggregate badge color. The badge text still lists every

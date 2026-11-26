@@ -37,7 +37,7 @@ Code changes; Kanban; mouse; configurable keybindings; agent message/title panes
 
 | TUI-UX rule | This brief | Why |
 |---|---|---|
-| §1/§13/§15: “Per-status colors/icons … deferred” (`TUI-UX.md:32,690,718`) | #13 schedules them; §8.2 defines the schema | The design system now exists; deferral is obsolete |
+| §1/§13/§15: “Per-status colors/icons … deferred” (`TUI-UX.md:32,690,718`) | #13 ships them; §8.2 defines the schema | The design system now exists; deferral is obsolete |
 | §4.3: at 80+, project max 12, badge max 28, branch flex (`TUI-UX.md:220-223`) | Adds a ≥120 tier: project 16, marker cell, badge/count rail, branch flex; 60–79 gets a single-space footer | Wide terminals need a rail and an explicit cap |
 | §4.1/§4.3: full-width separator and rows | Separator and all frame lines are capped at 120 and centered above 120 | A 200-column rule under a 200-column header was the sparseness defect |
 | §3.2: count after badge (`TUI-UX.md:86-106`) | Order unchanged; the count moves to a right-aligned rail at ≥80 | Alignment, not data |
@@ -102,12 +102,12 @@ Defaults for the five built-in IDs; custom IDs get `auto`:
 
 - `in_progress` → accent blue. `blocked` → error red. `in_review` → purple. `ready` → green. `done` → muted.
 - `auto` for a custom ID: deterministic pick from `[accent, in_review purple, info cyan, agent.unknown amber]` by FNV hash of the ID. Never blocked-red or ready-green.
-- In #12, IDs outside the five built-ins render muted; the deterministic hash resolver above is #13’s extension.
+- In #12, IDs outside the five built-ins rendered muted. #13 resolves a custom ID through the hash unless the status configures a `color`; a configured color wins over both maps.
 - Group header: `▌` in the status color; label bold `text`; count `muted`; optional icon in the status color before the label.
-- The parent row never repeats the status (`TUI-UX.md:100-102`). The status selector shows the same icon/color beside each label.
+- The parent row never repeats the status (`TUI-UX.md:100-102`). The status selector shows the same icon and paints only that icon with the status color; the label stays base bold.
 - Color is redundant: the label is always present, and the group header’s `▌` is a static shape.
 
-Icons default to empty (decision, see §10). An icon is one grapheme, 1–2 cells, sanitized; invalid → omitted with a warning.
+Icons default to empty (decision, see §10). An icon is one grapheme, 1–2 cells, sanitized; empty means no icon. `color` accepts `auto`, a named adaptive ANSI color (`black`…`white`, `bright-<name>`), `#RGB`/`#RRGGBB`, or `ansi256:0-255`. Invalid values never fail the load: a bad color falls back to `auto` and a bad icon is omitted at render time, each with a visible warning in the CLI and the TUI banner (the deliberate cosmetic exception to `README.md` principle #9). The raw value stays in `config.json`, so a Save never silently rewrites it. A fixed color below 3:1 on either assumed background also warns; configured colors are decorative (marker and icon only), so labels always remain base text. Icons render as configured, so emoji presentation and width depend on the terminal and font.
 
 ### 2.4 Agent map and badge coloring
 
@@ -760,14 +760,14 @@ Ordered; depends on #12’s theme.
    Empty = `auto` / no icon. `DefaultStatuses()` (`:28-37`) stays empty so old configs and `rexws list` are unchanged; the built-in five resolve by ID in the theme.
    - `color` grammar: `auto` (default), a named adaptive color (`black|red|green|yellow|blue|magenta|cyan|white|bright-<name>`), `#RGB`/`#RRGGBB`, or `ansi256:0-255`.
    - `icon`: one grapheme, 1–2 display cells, no C0/C1 controls, no ESC; trimmed; empty = none.
-2. **Lenient validation and warnings.** Add `Warnings []string `json:"-"`` to `Config` (`internal/config/config.go:34-42`), populated after load by a style pass (called from `Load` at `:84` and `RegisterProject`). Invalid color → warning + `auto`; invalid icon → warning + none. Never fail the load. Confirmed 2026-11-26: this deliberately relaxes `README.md` principle #9 for cosmetic style fields; the warning is visible, never silent. Surface warnings: CLI `warning:` on stderr (alongside existing Rex warnings), TUI persistent banner (config class, after project discovery). Cite `internal/tui/model.go:219-226` for the warning aggregation.
-3. **Resolver.** In `theme.go`: `auto` = built-in IDs by §2.3, custom IDs by deterministic hash; named = adaptive pair; hex/256 = fixed. Optional contrast warning when a fixed color is <3:1 against both `#FFF` and `#1E1E1E`.
-4. **Render.** Group header `▌ <icon> LABEL (count)`; icon/`▌` in the status color, label base bold, count muted. Status selector rows get the icon and color; `(current)` remains the text marker. Parent rows stay status-free (`TUI-UX.md:100-102`).
+2. **Lenient validation and warnings.** Add `Warnings []string `json:"-"`` to `Config` (`internal/config/config.go:34-42`), populated after load by a style pass (called from `Load` at `:84` and `RegisterProject`). Invalid color → warning; invalid icon → warning. Raw values stay in the config so a Save cannot silently fix them; the resolver falls back to `auto` / no icon at render time. Never fail the load. Confirmed 2026-11-26: this deliberately relaxes `README.md` principle #9 for cosmetic style fields; the warning is visible, never silent. Surface warnings: CLI `warning:` on stderr from every `config.Load` call site, TUI persistent banner (config class, lowest priority). Cite `internal/tui/model.go:219-226` for the warning aggregation.
+3. **Resolver.** In `theme.go`: `auto` = built-in IDs by §2.3, custom IDs by deterministic hash; named = adaptive pair; hex/256 = fixed. Warn when a fixed color is below 3:1 on an assumed light or dark background; configured colors decorate only the group marker and icon.
+4. **Render.** Group header `▌ <icon> LABEL (count)`; icon/`▌` in the status color, label base bold, count muted. Status selector rows show the icon (the only colored part) and keep the label base bold; `(current)` remains the text marker. Parent rows stay status-free (`TUI-UX.md:100-102`).
 5. **CLI unchanged.** `cmd/rexws/list.go:68-74` keeps `WorkflowStatusLabel` and `render.Default.Format`; add a test asserting no icon/color in `rexws list`. The JSON shape is unchanged.
 6. **Schema version.** None. The fields are optional and additive; old configs load unchanged; `Default()` emits no color/icon. ROADMAP #6’s `schema_version` is for CLI JSON, not config. Revisit if a `theme` block or a non-additive color grammar appears.
-7. **Docs.** README config example (`README.md:174-219`), SPEC §2 model (`SPEC.md:86-96`; note #14’s fixed-enum drift), TUI-UX §13/§15 mark scheduled, TUI-DESIGN §2.3.
+7. **Docs.** README config example (`README.md:174-219`), SPEC §2 model (`SPEC.md:86-96`; note #14’s fixed-enum drift), TUI-UX §13/§15 mark implemented, TUI-DESIGN §2.3.
 8. **Tests.** `internal/config`: defaults, named/hex/ansi256, invalid values → warnings + fallback, icon sanitization, old config loads. `internal/tui`: group header and selector render icons/colors under TrueColor; Ascii still readable; width tests. CLI unchanged.
-9. **Supersession.** `TUI-UX.md:32` (non-goal), `:690` (resolved decision), `:718` (out of scope), and ROADMAP M8 (`ROADMAP.md:61-68`) are superseded by #13. Amend them to “scheduled in #13; see TUI-DESIGN.md” when #13 lands.
+9. **Supersession.** `TUI-UX.md:32` (non-goal), `:690` (resolved decision), `:718` (out of scope), and ROADMAP M8 (`ROADMAP.md:61-68`) are superseded by #13. Amend them to “implemented in #13; see TUI-DESIGN.md” when #13 lands.
 
 **#13 acceptance:** old configs load with no migration; invalid values warn, never crash or silently miscolor; the TUI renders configured icon/color; `rexws list` unchanged; tests cover defaults, overrides, invalid input.
 
@@ -784,7 +784,7 @@ Ordered; depends on #12’s theme.
 Also add:
 - §4.3 after the 80+ rules: “At ≥120 columns, see `TUI-DESIGN.md` §3 for the 120-cell content cap and column grid.”
 - §10 after the glyph list: “Color roles, glyph fallbacks, and wide-layout rules are defined in `TUI-DESIGN.md` §2 and §7.”
-- §13/§15: change the per-status color/icon entries from “deferred/out of scope” to “scheduled in #13; see `TUI-DESIGN.md` §8.2.”
+- §13/§15: change the per-status color/icon entries from “deferred/out of scope” to “implemented in #13; see `TUI-DESIGN.md` §8.2.”
 - README TUI section (`README.md:161`): add “Visual system and wide-terminal layout: `TUI-DESIGN.md`.”
 
 ---

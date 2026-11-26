@@ -5,7 +5,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/ops"
 )
 
@@ -19,7 +18,7 @@ func newStatusCmd() *cobra.Command {
 			"SELECTOR uses the grammar in README.md; a literal worktree path still works.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load()
+			cfg, err := loadConfig(cmd)
 			if err != nil {
 				return err
 			}

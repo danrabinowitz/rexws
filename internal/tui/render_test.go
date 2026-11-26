@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -254,6 +255,149 @@ func TestRenderStatusModal(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("status modal missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func statusesWithStyles() []config.StatusDef {
+	return []config.StatusDef{
+		{ID: config.StatusInProgress, Label: "In Progress", Color: "blue", Icon: "◆"},
+		{ID: config.StatusBlocked, Label: "Blocked", Color: "#ff0000", Icon: "■"},
+		{ID: config.StatusInReview, Label: "In Review", Color: "bright-magenta"},
+		{ID: config.StatusReady, Label: "Ready", Color: "ansi256:245", Icon: "中"},
+		{ID: config.StatusDone, Label: "Done"},
+	}
+}
+
+func TestRenderGroupHeaderUsesConfiguredStyle(t *testing.T) {
+	setRenderer(t, termenv.TrueColor, true)
+	s := testState(t)
+	s.cfg.Statuses = statusesWithStyles()
+	s = s.rebuild()
+	out := Render(s)
+	assertScreen(t, out, 80, 24)
+
+	for _, want := range []string{"◆", "IN PROGRESS", "■", "BLOCKED"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("group header missing %q:\n%s", want, out)
+		}
+	}
+	// Named blue is ANSI index 12 on dark; the hex color stays truecolor.
+	for _, want := range []string{"\x1b[94m", "\x1b[38;2;255;0;0m"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("group header missing SGR %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderGroupHeaderAsciiReadable(t *testing.T) {
+	t.Setenv("REXWS_ASCII", "1")
+	setRenderer(t, termenv.Ascii, false)
+	s := testState(t)
+	s.cfg.Statuses = statusesWithStyles()
+	s = s.rebuild()
+	out := Render(s)
+	assertScreen(t, out, 80, 24)
+
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("Ascii render contains SGR:\n%q", out)
+	}
+	if !strings.Contains(out, "| ◆ IN PROGRESS (2)") || !strings.Contains(out, "| ■ BLOCKED (1)") {
+		t.Errorf("Ascii group headers are not readable:\n%s", out)
+	}
+}
+
+func TestRenderStatusIconsDoNotOverflow(t *testing.T) {
+	for _, width := range []int{60, 80, 120, 200} {
+		t.Run(fmt.Sprintf("%d", width), func(t *testing.T) {
+			setRenderer(t, termenv.TrueColor, true)
+			s := testState(t)
+			s.cfg.Statuses = statusesWithStyles()
+			s.width, s.height = width, 24
+			s = s.rebuild()
+			out := Render(s)
+			assertScreen(t, out, width, 24)
+		})
+	}
+}
+
+func TestRenderStatusModalShowsConfiguredStyle(t *testing.T) {
+	setRenderer(t, termenv.TrueColor, true)
+	s := testState(t)
+	s.cfg.Statuses = statusesWithStyles()
+	s = s.rebuild()
+	s, _ = Reduce(s, runeKey('s'))
+	out := Render(s)
+	assertScreen(t, out, 80, 24)
+
+	if !strings.Contains(out, "\x1b[1;94m◆  \x1b[0m") {
+		t.Errorf("status selector did not use a two-cell icon slot:\n%q", out)
+	}
+	if !strings.Contains(out, "\x1b[1;94m") {
+		t.Errorf("status selector missing the configured color:\n%q", out)
+	}
+	if !strings.Contains(out, "\x1b[1mIn Progress (current)\x1b[0m") {
+		t.Errorf("selected status label is not bold:\n%q", out)
+	}
+	if strings.Contains(out, "\x1b[1mBlocked") {
+		t.Errorf("non-selected status label is bold:\n%q", out)
+	}
+}
+
+func TestRenderStatusSelectorKeepsLabelReadable(t *testing.T) {
+	setRenderer(t, termenv.TrueColor, false) // light background
+	s := testState(t)
+	s.cfg.Statuses = []config.StatusDef{
+		{ID: config.StatusInProgress, Label: "In Progress", Color: "#ffff00", Icon: "◆"},
+		{ID: config.StatusDone, Label: "Done"},
+	}
+	s = s.rebuild()
+	s, _ = Reduce(s, runeKey('s'))
+	out := Render(s)
+	assertScreen(t, out, 80, 24)
+
+	// The low-contrast color paints only the icon; the label stays readable.
+	if !strings.Contains(out, "\x1b[1;38;2;255;255;0m◆") {
+		t.Errorf("icon did not carry the configured color:\n%q", out)
+	}
+	if !strings.Contains(out, "\x1b[1mIn Progress (current)\x1b[0m") {
+		t.Errorf("label did not remain base bold:\n%q", out)
+	}
+}
+
+func TestRenderStatusModalAsciiReadable(t *testing.T) {
+	t.Setenv("REXWS_ASCII", "1")
+	setRenderer(t, termenv.Ascii, false)
+	s := testState(t)
+	s.cfg.Statuses = statusesWithStyles()
+	s = s.rebuild()
+	s, _ = Reduce(s, runeKey('s'))
+	out := Render(s)
+	assertScreen(t, out, 80, 24)
+
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("Ascii status selector contains SGR:\n%q", out)
+	}
+	for _, want := range []string{"1 ◆  In Progress (current)", "4 中 Ready"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Ascii status selector missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderGroupMatchSpansHitTheLabel(t *testing.T) {
+	setRenderer(t, termenv.TrueColor, false)
+	row := Row{
+		Kind:       RowGroup,
+		GroupID:    config.StatusInProgress,
+		GroupLabel: "IN PROGRESS",
+		GroupIcon:  "◆",
+		GroupSpans: []Span{{Start: 3, End: 11}},
+	}
+	out := renderGroupRow(row, 40, currentTheme())
+	// The unhighlighted label prefix ends immediately before "PROGRESS"; an
+	// icon lives in its own segment and must not shift the label's rune spans.
+	if !strings.Contains(out, "\x1b[1m IN \x1b[0m") {
+		t.Errorf("group match spans are offset: %q", out)
 	}
 }
 

@@ -109,6 +109,7 @@ const (
 	warningAmbiguity = iota
 	warningDiscovery
 	warningSession
+	warningConfig
 )
 
 // persistentWarning is one load-time condition. Conditions persist until a

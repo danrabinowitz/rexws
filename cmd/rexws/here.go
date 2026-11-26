@@ -28,7 +28,7 @@ func newHereCmd() *cobra.Command {
 			if cmd.Flags().Changed("dir") && dir == "" {
 				return errors.New("--dir must name a directory")
 			}
-			cfg, err := config.Load()
+			cfg, err := loadConfig(cmd)
 			if err != nil {
 				return err
 			}

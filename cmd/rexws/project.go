@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/git"
 	"github.com/danrabinowitz/rexws/internal/pathutil"
 )
@@ -41,7 +40,7 @@ func newProjectAddCmd() *cobra.Command {
 				return err
 			}
 
-			cfg, err := config.Load()
+			cfg, err := loadConfig(cmd)
 			if err != nil {
 				return err
 			}

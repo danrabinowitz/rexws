@@ -207,9 +207,74 @@ func TestStatusColors(t *testing.T) {
 			t.Errorf("statusToken(%q) = %#v, want %#v", id, got, want)
 		}
 	}
-	// #12 keeps custom IDs muted; #13 owns custom status colors.
-	if got := statusToken("custom-stage"); got != tokMuted {
-		t.Errorf("custom status = %#v, want muted", got)
+	// Custom IDs hash into the four reserved hues and never take the
+	// blocked-red or ready-green tokens.
+	custom := statusToken("custom-stage")
+	if custom == tokError || custom == tokReady {
+		t.Errorf("custom status used a reserved urgency color: %#v", custom)
+	}
+	allowed := []colorToken{tokAccent, tokInReview, tokInfo, tokAgentUnknown}
+	found := false
+	for _, token := range allowed {
+		if custom == token {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("custom status = %#v, want one of the reserved hues", custom)
+	}
+	if statusToken("custom-stage") != custom {
+		t.Error("custom status color is not deterministic")
+	}
+}
+
+func TestConfiguredStatusColor(t *testing.T) {
+	setRenderer(t, termenv.TrueColor, true)
+	theme := currentTheme()
+
+	cases := []struct {
+		name string
+		def  config.StatusDef
+		want string
+	}{
+		{"named", config.StatusDef{ID: "custom", Color: "red"}, "\x1b[91m"},
+		{"named light/dark pair", config.StatusDef{ID: "custom", Color: "blue"}, "\x1b[94m"},
+		{"bright named", config.StatusDef{ID: "custom", Color: "bright-magenta"}, "\x1b[95m"},
+		{"hex", config.StatusDef{ID: "custom", Color: "#112233"}, "\x1b[38;2;17;34;51m"},
+		{"ansi256", config.StatusDef{ID: "custom", Color: "ansi256:200"}, "\x1b[38;5;200m"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := theme.StatusDef(tc.def).Render("x"); !strings.Contains(got, tc.want) {
+				t.Errorf("rendered %q, want SGR %q", got, tc.want)
+			}
+		})
+	}
+
+	// A named color uses the normal index on a light background and the bright
+	// index on a dark one.
+	setRenderer(t, termenv.TrueColor, false)
+	if got := currentTheme().StatusDef(config.StatusDef{ID: "custom", Color: "blue"}).Render("x"); !strings.Contains(got, "\x1b[34m") {
+		t.Errorf("light named blue = %q, want SGR 34", got)
+	}
+}
+
+func TestStatusDefFallbacks(t *testing.T) {
+	// A configured color beats the built-in map and the custom hash.
+	configured := statusTokenFor(config.StatusDef{ID: config.StatusBlocked, Color: "green"})
+	if configured == tokError {
+		t.Errorf("configured color did not win: %#v", configured)
+	}
+	custom := statusTokenFor(config.StatusDef{ID: "custom", Color: "red"})
+	if custom == statusToken("custom") {
+		t.Errorf("configured color did not win over the custom hash: %#v", custom)
+	}
+
+	// auto, empty, and invalid colors fall back to the ID.
+	for _, value := range []string{"", config.ColorAuto, "chartreuse", "#12", "ansi256:999"} {
+		if got := statusTokenFor(config.StatusDef{ID: config.StatusInProgress, Color: value}); got != tokAccent {
+			t.Errorf("color %q = %#v, want the in-progress accent", value, got)
+		}
 	}
 }
 

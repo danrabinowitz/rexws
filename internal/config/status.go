@@ -19,10 +19,13 @@ const (
 	StatusDone       Status = "done"
 )
 
-// StatusDef is one configured workflow stage.
+// StatusDef is one configured workflow stage. Color and Icon only affect the
+// TUI; an empty color means auto and an empty icon renders nothing.
 type StatusDef struct {
 	ID    Status `json:"id"`
 	Label string `json:"label"`
+	Color string `json:"color,omitempty"`
+	Icon  string `json:"icon,omitempty"`
 }
 
 // DefaultStatuses returns the built-in stages and their display labels.

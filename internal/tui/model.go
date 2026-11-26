@@ -228,6 +228,7 @@ type loadedMsg struct {
 	workstreams       []core.Workstream
 	sessions          []core.Session
 	discoveryWarnings []string
+	configWarnings    []string
 	sessionWarnings   []string
 	rexAvailable      bool
 	fatalKind         string
@@ -267,6 +268,7 @@ func loadCmd(ctx context.Context) tea.Cmd {
 			workstreams:       workstreams,
 			sessions:          sessions,
 			discoveryWarnings: discoveryWarnings,
+			configWarnings:    append([]string(nil), cfg.Warnings...),
 			sessionWarnings:   append([]string(nil), rexState.Warnings...),
 			rexAvailable:      rexState.Err == nil,
 			loadErr:           err,
@@ -319,10 +321,13 @@ func (m *Model) handleLoaded(msg loadedMsg) (*Model, tea.Cmd) {
 	ambiguity := analyzeAmbiguity(m.state.sessions, m.state.workstreams)
 	m.state.ambiguousSessions = ambiguity.sessions
 	m.state.ambiguousLabels = ambiguity.labels
-	warnings := make([]persistentWarning, 0, len(ambiguity.warnings)+len(msg.discoveryWarnings)+len(msg.sessionWarnings))
+	warnings := make([]persistentWarning, 0, len(ambiguity.warnings)+len(msg.discoveryWarnings)+len(msg.configWarnings)+len(msg.sessionWarnings))
 	warnings = append(warnings, ambiguity.warnings...)
 	for _, text := range msg.discoveryWarnings {
 		warnings = append(warnings, persistentWarning{text: text, class: warningDiscovery})
+	}
+	for _, text := range msg.configWarnings {
+		warnings = append(warnings, persistentWarning{text: text, class: warningConfig})
 	}
 	for _, text := range msg.sessionWarnings {
 		warnings = append(warnings, persistentWarning{text: text, class: warningSession})

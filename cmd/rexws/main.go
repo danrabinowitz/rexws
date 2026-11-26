@@ -88,6 +88,20 @@ func newTuiCmd() *cobra.Command {
 	}
 }
 
+// loadConfig reads config.json and reports cosmetic style warnings on stderr.
+// Commands that already print warnings still call this so config warnings are
+// never dropped.
+func loadConfig(cmd *cobra.Command) (config.Config, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return config.Config{}, err
+	}
+	for _, warning := range cfg.Warnings {
+		fmt.Fprintln(cmd.ErrOrStderr(), "warning:", warning)
+	}
+	return cfg, nil
+}
+
 // discover reads the worktrees of every registered project. The CLI treats a
 // project that cannot be read as fatal; the TUI uses ops.Discover directly and
 // keeps the readable projects.

@@ -96,6 +96,8 @@ func BuildRows(opts BuildOptions) BuildResult {
 			GroupID:    def.ID,
 			GroupLabel: groupLabel,
 			GroupCount: count,
+			GroupColor: def.Color,
+			GroupIcon:  def.ResolvedIcon(),
 			GroupSpans: matchSpans(groupLabel, query),
 		})
 

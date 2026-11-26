@@ -21,7 +21,7 @@ func newListCmd() *cobra.Command {
 		Short: "List workstreams with workflow and Rex state",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load()
+			cfg, err := loadConfig(cmd)
 			if err != nil {
 				return err
 			}
@@ -47,15 +47,19 @@ func newListCmd() *cobra.Command {
 			warnings = append(warnings, buildWarnings...)
 			workstreams = core.FilterStatuses(workstreams, filter)
 
+			// Config warnings were printed by loadConfig; keep them in the JSON
+			// payload but do not print them twice. Rex and skipped-worktree
+			// warnings are printed once here.
 			for _, warning := range warnings {
 				fmt.Fprintln(cmd.ErrOrStderr(), "warning:", render.Sanitize(warning))
 			}
+			jsonWarnings := append(append([]string(nil), cfg.Warnings...), warnings...)
 
 			if asJSON {
 				return encodeJSON(cmd, ListPayload{
 					SchemaVersion: SchemaVersion,
 					Workstreams:   workstreams,
-					Warnings:      warnings,
+					Warnings:      jsonWarnings,
 				})
 			}
 

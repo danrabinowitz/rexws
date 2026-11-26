@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/ops"
 	"github.com/danrabinowitz/rexws/internal/render"
 )
@@ -400,10 +401,18 @@ func renderRows(s State, width int, t theme) []string {
 }
 
 func renderGroupRow(row Row, width int, t theme) string {
+	statusStyle := t.StatusDef(config.StatusDef{ID: row.GroupID, Color: row.GroupColor})
 	segs := []seg{
-		{text: " " + t.glyphs.group, style: t.Status(row.GroupID)},
-		{text: " " + row.GroupLabel, spans: offsetSpans(row.GroupSpans, 3), style: lipgloss.NewStyle().Bold(true)},
+		{text: " " + t.glyphs.group, style: statusStyle},
 	}
+	if row.GroupIcon != "" {
+		segs = append(segs, seg{text: " " + row.GroupIcon, style: statusStyle})
+	}
+	segs = append(segs, seg{
+		text:  " " + row.GroupLabel,
+		spans: offsetSpans(row.GroupSpans, 1),
+		style: lipgloss.NewStyle().Bold(true),
+	})
 	if row.GroupCount != "" {
 		segs = append(segs, seg{text: " " + row.GroupCount, style: t.muted()})
 	}
@@ -937,15 +946,28 @@ func renderStatusModal(s State, width, height int, t theme) string {
 		if i < 9 {
 			number = fmt.Sprintf("%d ", i+1)
 		}
-		label := prefix + number + render.Sanitize(def.Label)
+		// Only the icon carries the configured color; the label stays base
+		// text so a low-contrast fixed color cannot make it unreadable. The
+		// icon occupies a fixed two-cell slot so labels align.
+		icon := def.ResolvedIcon()
+		iconCell := pad(icon, 2) + " "
+		iconStyle := t.StatusDef(def)
+		if i == modal.index {
+			iconStyle = iconStyle.Bold(true)
+		}
+		label := render.Sanitize(def.Label)
 		if def.ID == modal.current {
 			label += " (current)"
 		}
-		style := t.Status(def.ID)
+		labelStyle := lipgloss.NewStyle()
 		if i == modal.index {
-			style = style.Bold(true)
+			labelStyle = labelStyle.Bold(true)
 		}
-		lines = append(lines, style.Render(label))
+		line := prefix + number + iconCell + labelStyle.Render(label)
+		if icon != "" {
+			line = prefix + number + iconStyle.Render(iconCell) + labelStyle.Render(label)
+		}
+		lines = append(lines, line)
 	}
 	return renderModalBox("Status", lipgloss.NewStyle().Bold(true), lines, width, height, t)
 }

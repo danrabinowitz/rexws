@@ -61,10 +61,20 @@ Store configuration and mutable state in two small, human-readable JSON files un
       "provider": "monorepo-sparse",
       "worktree_root": "/Users/djr/code/worktrees/monorepo"
     }
-  ]
+  ],
+  "statuses": [
+    { "id": "in_progress", "label": "In Progress" },
+    { "id": "blocked", "label": "Blocked", "color": "red", "icon": "■" },
+    { "id": "in_review", "label": "In Review" },
+    { "id": "ready", "label": "Ready" },
+    { "id": "done", "label": "Done" }
+  ],
+  "default_status": "ready"
 }
 
 ```
+
+`statuses` is the configurable workflow list; IDs, labels, order, and the default are all user-defined. Each entry may set `color` (`auto` by default) and `icon` (empty by default) for the TUI. Both are optional with `omitempty`, so older configs load unchanged. An invalid value warns and is resolved to `auto` or no icon at render time rather than failing the load; the raw text stays in `config.json`.
 
 ### `state.json` (Workflow Metadata)
 
@@ -89,7 +99,7 @@ Keyed by canonical worktree path. Missing entries default to `ready`.
 * `Branch` (string)
 * `Path` (string, canonical)
 * `SessionName` (string, `<project>/<branch>`)
-* `WorkflowStatus` (`in_progress` | `blocked` | `in_review` | `ready` | `done`)
+* `WorkflowStatus` (configured status ID; the built-in five are `in_progress` | `blocked` | `in_review` | `ready` | `done`)
 * `RexSessionID` (string, empty if stopped)
 * `AgentState` (`blocked` | `error` | `working` | `done` | `idle` | `stopped`)
 * `AgentDetail` (string, e.g., permission prompt kind from `OSC 7501`)

@@ -611,8 +611,8 @@ Everything lives in two human-editable JSON files under `~/.config/rexws/`
   "statuses": [
     { "id": "in_progress", "label": "In Progress" },
     { "id": "blocked", "label": "Blocked" },
-    { "id": "in_review", "label": "In Review" },
-    { "id": "ready", "label": "Ready" },
+    { "id": "in_review", "label": "In Review", "icon": "◆" },
+    { "id": "ready", "label": "Ready", "color": "green" },
     { "id": "done", "label": "Done" }
   ],
   "default_status": "ready",
@@ -641,6 +641,26 @@ an example, not a supported integration.
 **Statuses** are entirely yours to define: IDs, labels, order, and default.
 Removing a status that `state.json` still references is a loud error rather than
 a silent remap.
+
+Each status may also set an optional `color` and `icon` for the TUI:
+
+- `color` is `auto` (the default), a named adaptive ANSI color (`black`, `red`,
+  `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, or `bright-<name>`),
+  `#RGB`/`#RRGGBB`, or `ansi256:0-255`.
+- `icon` is one grapheme cluster occupying one or two display cells, with no
+  control characters. Icons are opt-in: an empty value renders nothing.
+- The five built-in IDs resolve their colors without configuration
+  (`in_progress` blue, `blocked` red, `in_review` purple, `ready` green,
+  `done` muted). A custom ID gets a deterministic color from the accent,
+  purple, cyan, and amber hues. A configured color wins.
+- An invalid color or icon prints a `warning:` and falls back to `auto` or no
+  icon instead of failing the load. The TUI shows the same warning in its
+  banner. This is the deliberate exception to principle #9 below.
+- A fixed hex or `ansi256` color that falls below 3:1 contrast on an assumed
+  light or dark background also warns. The configured color only decorates the
+  group marker and icon, never body text, so the label stays readable.
+- Icons are rendered as-is. Emoji presentation and width depend on the terminal
+  and font; ASCII mode translates structural glyphs but not your icons.
 
 ### `state.json`
 
@@ -690,7 +710,12 @@ These are constraints the project is designed around, not aspirations:
    `state.json` belong in this binary. `IDEAS.md` classifies candidates against
    this rule.
 9. **Loud data integrity.** Invalid configuration, conflicting projects, and
-   references to removed statuses are errors, not silent fixes.
+   references to removed statuses are errors, not silent fixes. Cosmetic style
+   fields (`statuses[].color` and `statuses[].icon`) are the deliberate
+   exception: an invalid value prints a `warning:` and falls back (`auto` or no
+   icon) at render time, because a typo there cannot corrupt data. The value
+   stays untouched in `config.json`, so the warning repeats until you fix it;
+   it is never a silent rewrite.
 
 ---
 
