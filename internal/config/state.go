@@ -6,47 +6,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"slices"
+	"sort"
 	"strings"
 	"time"
 )
-
-// Status is the human workflow stage of a workstream.
-type Status string
-
-const (
-	StatusInProgress Status = "in_progress"
-	StatusBlocked    Status = "blocked"
-	StatusInReview   Status = "in_review"
-	StatusReady      Status = "ready"
-	StatusDone       Status = "done"
-)
-
-// Statuses lists every workflow stage in dashboard order.
-var Statuses = []Status{StatusInProgress, StatusBlocked, StatusInReview, StatusReady, StatusDone}
-
-// ParseStatus validates a stage name.
-func ParseStatus(s string) (Status, error) {
-	status := Status(s)
-	if !status.Valid() {
-		return "", fmt.Errorf("unknown status %q (want one of %s)", s, StatusList())
-	}
-	return status, nil
-}
-
-// Valid reports whether s is a known workflow stage.
-func (s Status) Valid() bool {
-	return slices.Contains(Statuses, s)
-}
-
-// StatusList returns the stage names comma-separated, for error messages.
-func StatusList() string {
-	names := make([]string, len(Statuses))
-	for i, s := range Statuses {
-		names[i] = string(s)
-	}
-	return strings.Join(names, ", ")
-}
 
 // WorkstreamState is the persisted metadata for one worktree.
 type WorkstreamState struct {
@@ -65,8 +28,9 @@ func NewState() State {
 	return State{Workstreams: make(map[string]WorkstreamState)}
 }
 
-// LoadState reads state.json. A missing file yields empty state.
-func LoadState() (State, error) {
+// LoadState reads state.json. A missing file yields empty state. Every stored
+// status must appear in allowed, which comes from the configured status set.
+func LoadState(allowed []Status) (State, error) {
 	path, err := StatePath()
 	if err != nil {
 		return State{}, err
@@ -85,10 +49,20 @@ func LoadState() (State, error) {
 	if st.Workstreams == nil {
 		st.Workstreams = make(map[string]WorkstreamState)
 	}
+
+	allowedSet := make(map[Status]bool, len(allowed))
+	for _, status := range allowed {
+		allowedSet[status] = true
+	}
+	var invalid []string
 	for worktree, ws := range st.Workstreams {
-		if !ws.Status.Valid() {
-			return State{}, fmt.Errorf("%s: workstream %q has unknown status %q", path, worktree, ws.Status)
+		if !allowedSet[ws.Status] {
+			invalid = append(invalid, fmt.Sprintf("%s (%s)", worktree, ws.Status))
 		}
+	}
+	if len(invalid) > 0 {
+		sort.Strings(invalid)
+		return State{}, fmt.Errorf("%s: entries use statuses not in config.json: %s; update them or add the statuses", path, strings.Join(invalid, ", "))
 	}
 	return st, nil
 }
@@ -102,13 +76,13 @@ func (s State) Save() error {
 	return writeJSON(path, s)
 }
 
-// For returns the stored metadata for a worktree path. Unknown paths default
-// to ready, as the spec requires.
-func (s State) For(path string) WorkstreamState {
+// For returns the stored metadata for a worktree path. Unknown paths use
+// fallback, which is config.json's default_status.
+func (s State) For(path string, fallback Status) WorkstreamState {
 	if ws, ok := s.Workstreams[path]; ok {
 		return ws
 	}
-	return WorkstreamState{Status: StatusReady}
+	return WorkstreamState{Status: fallback}
 }
 
 // SetStatus records a new workflow stage for a worktree, preserving its note.

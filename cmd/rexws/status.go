@@ -16,11 +16,16 @@ func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status <path> <stage>",
 		Short: "Set a workstream's workflow status",
-		Long: "Set a workstream's workflow status. Stages: " + config.StatusList() + ".\n" +
+		Long: "Set a workstream's workflow status. Stages are configured in config.json;\n" +
+			"the stage may be given by ID or by its display label.\n" +
 			"PATH is the worktree path shown by `rexws list`.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			status, err := config.ParseStatus(args[1])
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			status, err := cfg.ParseStatus(args[1])
 			if err != nil {
 				return err
 			}
@@ -29,10 +34,6 @@ func newStatusCmd() *cobra.Command {
 				return err
 			}
 
-			cfg, err := config.Load()
-			if err != nil {
-				return err
-			}
 			inputs, err := discover(cmd.Context(), cfg)
 			if err != nil {
 				return err
@@ -45,7 +46,7 @@ func newStatusCmd() *cobra.Command {
 				return fmt.Errorf("%s is not a worktree of a registered project; run `rexws list` to see known paths", path)
 			}
 
-			state, err := config.LoadState()
+			state, err := config.LoadState(cfg.StatusIDs())
 			if err != nil {
 				return err
 			}
@@ -53,15 +54,17 @@ func newStatusCmd() *cobra.Command {
 			if err := state.Save(); err != nil {
 				return err
 			}
+			label := cfg.StatusLabel(stored.Status)
 
 			if asJSON {
 				return encodeJSON(cmd, struct {
-					Path           string        `json:"path"`
-					WorkflowStatus config.Status `json:"workflow_status"`
-					UpdatedAt      time.Time     `json:"updated_at"`
-				}{path, stored.Status, stored.UpdatedAt})
+					Path                string        `json:"path"`
+					WorkflowStatus      config.Status `json:"workflow_status"`
+					WorkflowStatusLabel string        `json:"workflow_status_label"`
+					UpdatedAt           time.Time     `json:"updated_at"`
+				}{path, stored.Status, label, stored.UpdatedAt})
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s is now %s\n", path, stored.Status)
+			fmt.Fprintf(cmd.OutOrStdout(), "%s is now %s\n", path, label)
 			return nil
 		},
 	}

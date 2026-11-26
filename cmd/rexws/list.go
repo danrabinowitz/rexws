@@ -22,16 +22,15 @@ func newListCmd() *cobra.Command {
 		Short: "List workstreams with workflow and Rex state",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			filter, err := parseStatusFilters(statuses)
-			if err != nil {
-				return err
-			}
-
 			cfg, err := config.Load()
 			if err != nil {
 				return err
 			}
-			state, err := config.LoadState()
+			filter, err := parseStatusFilters(cfg, statuses)
+			if err != nil {
+				return err
+			}
+			state, err := config.LoadState(cfg.StatusIDs())
 			if err != nil {
 				return err
 			}
@@ -41,11 +40,14 @@ func newListCmd() *cobra.Command {
 			}
 
 			sessions, warnings := rexSessions(cmd)
-			workstreams, err := core.Build(inputs, state, sessions)
+			workstreams, err := core.Build(inputs, state, sessions, cfg.DefaultStatusValue())
 			if err != nil {
 				return err
 			}
 			workstreams = core.FilterStatuses(workstreams, filter)
+			for i := range workstreams {
+				workstreams[i].WorkflowStatusLabel = cfg.StatusLabel(workstreams[i].WorkflowStatus)
+			}
 
 			for _, warning := range warnings {
 				fmt.Fprintln(cmd.ErrOrStderr(), "warning:", warning)
@@ -67,13 +69,13 @@ func newListCmd() *cobra.Command {
 			fmt.Fprintln(writer, "PROJECT\tBRANCH\tSTATUS\tAGENT\tSESSION\tPATH")
 			for _, ws := range workstreams {
 				fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n",
-					ws.Project, ws.Branch, ws.WorkflowStatus, render.Default.Format(ws), shortSession(ws.RexSessionID), ws.Path)
+					ws.Project, ws.Branch, ws.WorkflowStatusLabel, render.Default.Format(ws), shortSession(ws.RexSessionID), ws.Path)
 			}
 			return writer.Flush()
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON")
-	cmd.Flags().StringSliceVar(&statuses, "status", nil, "only show these workflow statuses (repeatable or comma-separated)")
+	cmd.Flags().StringSliceVar(&statuses, "status", nil, "only show these workflow statuses by ID or label (repeatable or comma-separated)")
 	return cmd
 }
 
@@ -145,10 +147,10 @@ func agentLocation(block rex.BlockStatus) string {
 	return fmt.Sprintf("window %q block %q", window, label)
 }
 
-func parseStatusFilters(values []string) ([]config.Status, error) {
+func parseStatusFilters(cfg config.Config, values []string) ([]config.Status, error) {
 	var statuses []config.Status
 	for _, value := range values {
-		status, err := config.ParseStatus(value)
+		status, err := cfg.ParseStatus(value)
 		if err != nil {
 			return nil, err
 		}

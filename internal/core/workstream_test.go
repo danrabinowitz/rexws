@@ -55,7 +55,7 @@ func TestBuildMergesWorktreesStateAndSessions(t *testing.T) {
 		}},
 	}
 
-	got, err := Build(inputs, state, sessions)
+	got, err := Build(inputs, state, sessions, config.StatusReady)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestBuildDetachedWorktree(t *testing.T) {
 		Worktrees: []git.Worktree{{Path: wtDir, Head: "0123456789abcdef", Detached: true}},
 	}}
 
-	got, err := Build(inputs, config.NewState(), nil)
+	got, err := Build(inputs, config.NewState(), nil, config.StatusReady)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestBuildFailsForMissingWorktree(t *testing.T) {
 		Project:   config.Project{Name: "repo", Path: "/code/repo"},
 		Worktrees: []git.Worktree{{Path: filepath.Join(t.TempDir(), "missing"), Branch: "main"}},
 	}}
-	if _, err := Build(inputs, config.NewState(), nil); err == nil {
+	if _, err := Build(inputs, config.NewState(), nil, config.StatusReady); err == nil {
 		t.Fatal("expected an error for a missing worktree path")
 	}
 }
@@ -173,7 +173,7 @@ func TestBuildMultipleAgents(t *testing.T) {
 		},
 	}}
 
-	got, err := Build(inputs, config.NewState(), sessions)
+	got, err := Build(inputs, config.NewState(), sessions, config.StatusReady)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestBuildSessionWithoutAgentsIsIdle(t *testing.T) {
 	}}
 	sessions := []Session{{ID: "session:1", Label: "repo/main"}}
 
-	got, err := Build(inputs, config.NewState(), sessions)
+	got, err := Build(inputs, config.NewState(), sessions, config.StatusReady)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestBuildUnreadableSession(t *testing.T) {
 	}}
 	sessions := []Session{{ID: "session:1", Label: "repo/main", Unreadable: true}}
 
-	got, err := Build(inputs, config.NewState(), sessions)
+	got, err := Build(inputs, config.NewState(), sessions, config.StatusReady)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

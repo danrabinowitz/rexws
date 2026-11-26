@@ -34,12 +34,14 @@ type Project struct {
 type Config struct {
 	DefaultProvider string              `json:"default_provider"`
 	Providers       map[string]Provider `json:"providers"`
+	Statuses        []StatusDef         `json:"statuses"`
+	DefaultStatus   Status              `json:"default_status"`
 	Projects        []Project           `json:"projects"`
 }
 
 // Default returns the built-in configuration used when no config.json exists.
 func Default() Config {
-	return Config{
+	cfg := Config{
 		DefaultProvider: "git",
 		Providers: map[string]Provider{
 			"git": {
@@ -48,6 +50,8 @@ func Default() Config {
 			},
 		},
 	}
+	cfg.applyStatusDefaults()
+	return cfg
 }
 
 // Load reads config.json. A missing file yields the default configuration
@@ -75,6 +79,7 @@ func Load() (Config, error) {
 	if cfg.Providers == nil {
 		cfg.Providers = Default().Providers
 	}
+	cfg.applyStatusDefaults()
 	if err := cfg.Validate(); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -92,6 +97,9 @@ func (c Config) Save() error {
 
 // Validate rejects configurations that cannot be resolved consistently.
 func (c Config) Validate() error {
+	if err := c.validateStatuses(); err != nil {
+		return err
+	}
 	names := make(map[string]string, len(c.Projects))
 	paths := make(map[string]string, len(c.Projects))
 	for i, p := range c.Projects {

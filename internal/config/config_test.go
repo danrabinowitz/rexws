@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -20,6 +22,16 @@ func TestLoadDefaultsWithoutCreatingFile(t *testing.T) {
 	}
 	if _, ok := cfg.Providers["git"]; !ok {
 		t.Error("default git provider is missing")
+	}
+	wantStatuses := []Status{StatusInProgress, StatusBlocked, StatusInReview, StatusReady, StatusDone}
+	if got := cfg.StatusIDs(); !slices.Equal(got, wantStatuses) {
+		t.Errorf("StatusIDs = %v, want %v", got, wantStatuses)
+	}
+	if got := cfg.DefaultStatusValue(); got != StatusReady {
+		t.Errorf("DefaultStatusValue = %q, want ready", got)
+	}
+	if got := cfg.StatusLabel(StatusInProgress); got != "In Progress" {
+		t.Errorf("StatusLabel(in_progress) = %q", got)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "config.json")); !os.IsNotExist(err) {
 		t.Errorf("Load created config.json: %v", err)
@@ -61,6 +73,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if loaded.DefaultProvider != "git" {
 		t.Errorf("DefaultProvider = %q", loaded.DefaultProvider)
+	}
+	if len(loaded.Statuses) != len(DefaultStatuses()) || loaded.DefaultStatusValue() != StatusReady {
+		t.Errorf("statuses did not round-trip: %#v default=%q", loaded.Statuses, loaded.DefaultStatusValue())
 	}
 
 	info, err := os.Stat(filepath.Join(dir, "config.json"))
@@ -121,12 +136,15 @@ func TestLoadStateDefaultsToReady(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(EnvDir, dir)
 
-	state, err := LoadState()
+	state, err := LoadState(Default().StatusIDs())
 	if err != nil {
 		t.Fatalf("LoadState: %v", err)
 	}
-	if got := state.For("/some/worktree"); got.Status != StatusReady {
+	if got := state.For("/some/worktree", StatusReady); got.Status != StatusReady {
 		t.Errorf("unknown path status = %q, want ready", got.Status)
+	}
+	if got := state.For("/some/worktree", "todo"); got.Status != "todo" {
+		t.Errorf("custom fallback status = %q, want todo", got.Status)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "state.json")); !os.IsNotExist(err) {
 		t.Errorf("LoadState created state.json: %v", err)
@@ -154,11 +172,11 @@ func TestStateRoundTripPreservesNote(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	loaded, err := LoadState()
+	loaded, err := LoadState(Default().StatusIDs())
 	if err != nil {
 		t.Fatalf("LoadState: %v", err)
 	}
-	got := loaded.For("/worktree")
+	got := loaded.For("/worktree", StatusReady)
 	if got.Status != StatusBlocked || got.Note != "waiting on schema migration" || !got.UpdatedAt.Equal(now) {
 		t.Errorf("loaded state = %#v", got)
 	}
@@ -171,19 +189,161 @@ func TestLoadStateRejectsUnknownStatus(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "state.json"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadState(); err == nil {
+	if _, err := LoadState(Default().StatusIDs()); err == nil {
 		t.Fatal("expected an unknown-status error")
 	}
 }
 
 func TestParseStatus(t *testing.T) {
-	for _, status := range Statuses {
-		got, err := ParseStatus(string(status))
-		if err != nil || got != status {
-			t.Errorf("ParseStatus(%q) = %q, %v", status, got, err)
+	cfg := Default()
+	for _, def := range cfg.Statuses {
+		for _, value := range []string{
+			string(def.ID),
+			strings.ToUpper(string(def.ID)),
+			def.Label,
+			strings.ToUpper(def.Label),
+		} {
+			got, err := cfg.ParseStatus(value)
+			if err != nil || got != def.ID {
+				t.Errorf("ParseStatus(%q) = %q, %v; want %q", value, got, err, def.ID)
+			}
 		}
 	}
-	if _, err := ParseStatus("shipping"); err == nil {
+	if _, err := cfg.ParseStatus("shipping"); err == nil {
 		t.Error("ParseStatus accepted an unknown stage")
+	}
+}
+
+func TestCustomStatusSet(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(EnvDir, dir)
+	data := []byte(`{
+		"statuses": [
+			{"id": "todo", "label": "Todo"},
+			{"id": "doing", "label": "Doing"},
+			{"id": "blocked", "label": "Waiting"},
+			{"id": "done"}
+		],
+		"default_status": "todo"
+	}`)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	wantIDs := []Status{"todo", "doing", "blocked", "done"}
+	if got := cfg.StatusIDs(); !slices.Equal(got, wantIDs) {
+		t.Errorf("StatusIDs = %v, want %v", got, wantIDs)
+	}
+	if got := cfg.DefaultStatusValue(); got != "todo" {
+		t.Errorf("DefaultStatusValue = %q, want todo", got)
+	}
+	if got := cfg.StatusLabel("blocked"); got != "Waiting" {
+		t.Errorf("StatusLabel(blocked) = %q, want Waiting", got)
+	}
+	if got := cfg.StatusLabel("done"); got != "Done" {
+		t.Errorf("humanized label = %q, want Done", got)
+	}
+	if got, err := cfg.ParseStatus("Waiting"); err != nil || got != "blocked" {
+		t.Errorf("ParseStatus(Waiting) = %q, %v", got, err)
+	}
+	if got, err := cfg.ParseStatus("DOING"); err != nil || got != "doing" {
+		t.Errorf("ParseStatus(DOING) = %q, %v", got, err)
+	}
+	if _, err := cfg.ParseStatus("in_progress"); err == nil {
+		t.Error("ParseStatus accepted a status removed from the config")
+	}
+
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	if !slices.Equal(loaded.StatusIDs(), wantIDs) || loaded.DefaultStatusValue() != "todo" {
+		t.Errorf("statuses did not round-trip: %#v default=%q", loaded.Statuses, loaded.DefaultStatusValue())
+	}
+}
+
+func TestApplyStatusDefaults(t *testing.T) {
+	cfg := Config{}
+	cfg.applyStatusDefaults()
+	if got := cfg.DefaultStatusValue(); got != StatusReady {
+		t.Errorf("empty config default = %q, want ready", got)
+	}
+	if len(cfg.Statuses) != len(DefaultStatuses()) {
+		t.Errorf("empty config statuses = %#v", cfg.Statuses)
+	}
+
+	custom := Config{Statuses: []StatusDef{{ID: "archive"}, {ID: "todo"}}}
+	custom.applyStatusDefaults()
+	if custom.Statuses[0].Label != "Archive" || custom.Statuses[1].Label != "Todo" {
+		t.Errorf("labels = %#v", custom.Statuses)
+	}
+	if got := custom.DefaultStatusValue(); got != "archive" {
+		t.Errorf("default without ready = %q, want the first status", got)
+	}
+
+	withReady := Config{Statuses: []StatusDef{{ID: "todo", Label: "To Do"}, {ID: "ready"}}}
+	withReady.applyStatusDefaults()
+	if got := withReady.DefaultStatusValue(); got != StatusReady {
+		t.Errorf("default = %q, want ready", got)
+	}
+	if withReady.Statuses[0].Label != "To Do" {
+		t.Errorf("existing label overwritten: %#v", withReady.Statuses)
+	}
+}
+
+func TestValidateRejectsStatusProblems(t *testing.T) {
+	tests := map[string]func(*Config){
+		"no statuses": func(c *Config) {
+			c.Statuses = nil
+		},
+		"duplicate id": func(c *Config) {
+			c.Statuses[1].ID = c.Statuses[0].ID
+		},
+		"duplicate label": func(c *Config) {
+			c.Statuses[1].Label = strings.ToUpper(c.Statuses[0].Label)
+		},
+		"bad id": func(c *Config) {
+			c.Statuses[0].ID = "In Progress"
+		},
+		"missing default": func(c *Config) {
+			c.DefaultStatus = ""
+		},
+		"unknown default": func(c *Config) {
+			c.DefaultStatus = "shipping"
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg := Default()
+			mutate(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected a status validation error")
+			}
+		})
+	}
+}
+
+func TestLoadStateRejectsRemovedStatus(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(EnvDir, dir)
+	data := []byte(`{"workstreams":{"/worktree":{"status":"in_progress","updated_at":"2026-11-25T22:00:00Z"}}}`)
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadState([]Status{"todo", "doing", "done"})
+	if err == nil {
+		t.Fatal("expected an unconfigured-status error")
+	}
+	for _, want := range []string{"/worktree", "in_progress"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
 	}
 }

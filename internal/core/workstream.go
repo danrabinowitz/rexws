@@ -46,17 +46,18 @@ type Agent struct {
 
 // Workstream is one worktree enriched with workflow and Rex state.
 type Workstream struct {
-	Project        string        `json:"project"`
-	Branch         string        `json:"branch"`
-	Path           string        `json:"path"`
-	SessionName    string        `json:"session_name"`
-	WorkflowStatus config.Status `json:"workflow_status"`
-	Note           string        `json:"note,omitempty"`
-	RexSessionID   string        `json:"rex_session_id"`
-	AgentState     AgentState    `json:"agent_state"`
-	AgentDetail    string        `json:"agent_detail,omitempty"`
-	Agents         []Agent       `json:"agents"`
-	Detached       bool          `json:"detached,omitempty"`
+	Project             string        `json:"project"`
+	Branch              string        `json:"branch"`
+	Path                string        `json:"path"`
+	SessionName         string        `json:"session_name"`
+	WorkflowStatus      config.Status `json:"workflow_status"`
+	WorkflowStatusLabel string        `json:"workflow_status_label"`
+	Note                string        `json:"note,omitempty"`
+	RexSessionID        string        `json:"rex_session_id"`
+	AgentState          AgentState    `json:"agent_state"`
+	AgentDetail         string        `json:"agent_detail,omitempty"`
+	Agents              []Agent       `json:"agents"`
+	Detached            bool          `json:"detached,omitempty"`
 }
 
 // Input is the discovered worktrees for one project.
@@ -77,7 +78,8 @@ type Session struct {
 }
 
 // Build joins worktree discovery with state.json and Rex sessions.
-func Build(inputs []Input, state config.State, sessions []Session) ([]Workstream, error) {
+// defaultStatus is used for worktrees with no stored status.
+func Build(inputs []Input, state config.State, sessions []Session, defaultStatus config.Status) ([]Workstream, error) {
 	byLabel := make(map[string]Session, len(sessions))
 	for _, s := range sessions {
 		// Rex does not enforce unique labels. The first session in server
@@ -101,7 +103,7 @@ func Build(inputs []Input, state config.State, sessions []Session) ([]Workstream
 			if branch == "" {
 				branch = wt.ShortHead()
 			}
-			stored := state.For(path)
+			stored := state.For(path, defaultStatus)
 			ws := Workstream{
 				Project:        input.Project.Name,
 				Branch:         branch,
