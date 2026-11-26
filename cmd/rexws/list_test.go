@@ -1,79 +1,52 @@
 package main
 
 import (
-	"errors"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
-
-	"github.com/danrabinowitz/rexws/internal/agentstate"
-	"github.com/danrabinowitz/rexws/internal/core"
-	"github.com/danrabinowitz/rexws/internal/rex"
 )
 
-func TestCoreSessions(t *testing.T) {
-	snapshot := []rex.SessionStatus{
-		{
-			Session: rex.Session{ID: "session:1", Label: "repo/main"},
-			Blocks: []rex.BlockStatus{
-				{
-					BlockID: "block:1", BlockLabel: "shell", WindowID: "window:1", WindowLabel: "api",
-					State: agentstate.Working, App: "claude-code", EffectiveApp: "claude-code",
-					Msg: "Running tests", UpdatedAt: "2026-11-25T23:00:00Z",
-				},
-				{
-					BlockID: "block:2", BlockLabel: "logs", WindowID: "window:2", WindowLabel: "tests",
-					State: agentstate.Unknown, Err: errors.New("status unavailable"),
-				},
-			},
-			Windows: []rex.Window{
-				{
-					ID: "window:1", Label: "api", Active: true,
-					FocusedBlockID: "block:1", BlockIDs: []string{"block:1"},
-				},
-				{
-					ID: "window:2", Label: "tests",
-					FocusedBlockID: "block:2", BlockIDs: []string{"block:2"},
-				},
-			},
-		},
-		{
-			Session: rex.Session{ID: "session:2", Label: "repo/feat"},
-			Err:     errors.New("block list failed"),
-		},
-	}
+func TestListJSONPopulatesStatusLabelAndDegradesWithoutRex(t *testing.T) {
+	repo := testRepo(t)
+	testConfig(t, repo, "", "")
 
-	sessions, warnings := coreSessions(snapshot)
-	if len(sessions) != 2 {
-		t.Fatalf("got %d sessions", len(sessions))
+	fake := filepath.Join(t.TempDir(), "rex")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
 	}
+	t.Setenv("REXWS_REX_BIN", fake)
 
-	main := sessions[0]
-	if main.ID != "session:1" || main.Unreadable {
-		t.Errorf("main session = %#v", main)
+	stdout, _, err := runCLI(t, "list", "--json")
+	if err != nil {
+		t.Fatalf("list: %v", err)
 	}
-	if len(main.Agents) != 2 {
-		t.Fatalf("main agents = %#v", main.Agents)
+	var payload struct {
+		Workstreams []struct {
+			Project             string   `json:"project"`
+			Branch              string   `json:"branch"`
+			WorkflowStatus      string   `json:"workflow_status"`
+			WorkflowStatusLabel string   `json:"workflow_status_label"`
+			AgentState          string   `json:"agent_state"`
+			Warnings            []string `json:"warnings"`
+		} `json:"workstreams"`
+		Warnings []string `json:"warnings"`
 	}
-	working := main.Agents[0]
-	if working.WindowLabel != "api" || working.State != core.AgentWorking || working.Msg != "Running tests" {
-		t.Errorf("working agent = %#v", working)
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("parse JSON %q: %v", stdout, err)
 	}
-	unknown := main.Agents[1]
-	if unknown.State != core.AgentUnknown || unknown.Error != "status unavailable" {
-		t.Errorf("unknown agent = %#v", unknown)
+	if len(payload.Workstreams) != 1 {
+		t.Fatalf("workstreams = %#v", payload.Workstreams)
 	}
-	if len(main.Windows) != 2 {
-		t.Fatalf("main windows = %#v", main.Windows)
+	ws := payload.Workstreams[0]
+	if ws.WorkflowStatus != "ready" || ws.WorkflowStatusLabel != "Ready" {
+		t.Errorf("status = (%q, %q), want (ready, Ready)", ws.WorkflowStatus, ws.WorkflowStatusLabel)
 	}
-	if !main.Windows[0].Active || main.Windows[0].Label != "api" || main.Windows[1].Label != "tests" {
-		t.Errorf("main windows = %#v", main.Windows)
+	if ws.AgentState != "stopped" {
+		t.Errorf("agent state = %q, want stopped", ws.AgentState)
 	}
-
-	feat := sessions[1]
-	if !feat.Unreadable || feat.Agents != nil {
-		t.Errorf("feat session = %#v", feat)
-	}
-
-	if len(warnings) != 2 {
-		t.Fatalf("got %d warnings: %#v", len(warnings), warnings)
+	if len(payload.Warnings) == 0 || !strings.Contains(payload.Warnings[0], "Rex unavailable") {
+		t.Errorf("warnings = %#v, want a Rex-unavailable warning", payload.Warnings)
 	}
 }

@@ -20,17 +20,25 @@ const (
 	EventSessionDestroyed     EventType = "session_destroyed"
 	EventProgramStatusChanged EventType = "program_status_changed"
 	EventProgramStatusRemoved EventType = "program_status_removed"
+	EventSessionViewChanged   EventType = "session_view_changed"
+	EventActiveWindowChanged  EventType = "active_window_changed"
+	EventWindowCreated        EventType = "window_created"
+	EventWindowClosed         EventType = "window_closed"
+	EventWindowLabelChanged   EventType = "window_label_changed"
 )
 
 // Event is a normalized Rex event.
 type Event struct {
-	Type       EventType
-	SessionID  string
-	Label      string // session_created only
-	BlockID    string // program status events only
-	Record     *StatusRecord
-	RemovedIDs []string // program_status_removed only
-	Reason     string
+	Type        EventType
+	SessionID   string
+	Label       string // session_created only
+	BlockID     string // program status events only
+	WindowID    string // window events and active_window_changed
+	WindowLabel string // window_created and window_label_changed
+	Revision    int    // session_view_changed only
+	Record      *StatusRecord
+	RemovedIDs  []string // program_status_removed only
+	Reason      string
 }
 
 type rawEvent struct {
@@ -88,7 +96,53 @@ func ParseEvent(line []byte) (event Event, ok bool, err error) {
 		if err := json.Unmarshal(raw.Payload, &session); err != nil {
 			return Event{}, false, fmt.Errorf("parse session_event: %w", err)
 		}
-		if session.Event.Type != "block_event" {
+		switch session.Event.Type {
+		case string(EventSessionViewChanged):
+			var payload struct {
+				Revision int `json:"revision"`
+			}
+			if err := json.Unmarshal(session.Event.Payload, &payload); err != nil {
+				return Event{}, false, fmt.Errorf("parse session_view_changed: %w", err)
+			}
+			return Event{Type: EventSessionViewChanged, SessionID: session.SessionID, Revision: payload.Revision}, true, nil
+
+		case string(EventActiveWindowChanged):
+			var payload struct {
+				WindowID string `json:"window_id"`
+			}
+			if err := json.Unmarshal(session.Event.Payload, &payload); err != nil {
+				return Event{}, false, fmt.Errorf("parse active_window_changed: %w", err)
+			}
+			return Event{Type: EventActiveWindowChanged, SessionID: session.SessionID, WindowID: payload.WindowID}, true, nil
+
+		case string(EventWindowCreated), string(EventWindowLabelChanged):
+			var payload struct {
+				WindowID string `json:"window_id"`
+				Label    string `json:"label"`
+			}
+			if err := json.Unmarshal(session.Event.Payload, &payload); err != nil {
+				return Event{}, false, fmt.Errorf("parse %s: %w", session.Event.Type, err)
+			}
+			if payload.WindowID == "" {
+				return Event{}, false, fmt.Errorf("%s has no window_id", session.Event.Type)
+			}
+			return Event{Type: EventType(session.Event.Type), SessionID: session.SessionID, WindowID: payload.WindowID, WindowLabel: payload.Label}, true, nil
+
+		case string(EventWindowClosed):
+			var payload struct {
+				WindowID string `json:"window_id"`
+			}
+			if err := json.Unmarshal(session.Event.Payload, &payload); err != nil {
+				return Event{}, false, fmt.Errorf("parse window_closed: %w", err)
+			}
+			if payload.WindowID == "" {
+				return Event{}, false, errors.New("window_closed has no window_id")
+			}
+			return Event{Type: EventWindowClosed, SessionID: session.SessionID, WindowID: payload.WindowID}, true, nil
+
+		case "block_event":
+			// Handled below.
+		default:
 			return Event{}, false, nil
 		}
 		var block rawBlockEvent

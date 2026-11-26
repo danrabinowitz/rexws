@@ -89,9 +89,10 @@ type Session struct {
 	Unreadable bool
 }
 
-// Build joins worktree discovery with state.json and Rex sessions.
-// defaultStatus is used for worktrees with no stored status.
-func Build(inputs []Input, state config.State, sessions []Session, defaultStatus config.Status) ([]Workstream, error) {
+// Build joins worktree discovery with state.json and Rex sessions. cfg
+// supplies the default status and the display labels, so every frontend gets
+// the same labels without resolving them again.
+func Build(inputs []Input, state config.State, sessions []Session, cfg config.Config) ([]Workstream, error) {
 	byLabel := make(map[string]Session, len(sessions))
 	for _, s := range sessions {
 		// Rex does not enforce unique labels. The first session in server
@@ -115,18 +116,19 @@ func Build(inputs []Input, state config.State, sessions []Session, defaultStatus
 			if branch == "" {
 				branch = wt.ShortHead()
 			}
-			stored := state.For(path, defaultStatus)
+			stored := state.For(path, cfg.DefaultStatusValue())
 			ws := Workstream{
-				Project:        input.Project.Name,
-				Branch:         branch,
-				Path:           path,
-				SessionName:    input.Project.Name + "/" + branch,
-				WorkflowStatus: stored.Status,
-				Note:           stored.Note,
-				AgentState:     AgentStopped,
-				Agents:         []Agent{},
-				Windows:        []Window{},
-				Detached:       wt.Detached,
+				Project:             input.Project.Name,
+				Branch:              branch,
+				Path:                path,
+				SessionName:         input.Project.Name + "/" + branch,
+				WorkflowStatus:      stored.Status,
+				WorkflowStatusLabel: cfg.StatusLabel(stored.Status),
+				Note:                stored.Note,
+				AgentState:          AgentStopped,
+				Agents:              []Agent{},
+				Windows:             []Window{},
+				Detached:            wt.Detached,
 			}
 			if session, ok := byLabel[ws.SessionName]; ok {
 				ws.RexSessionID = session.ID
@@ -155,6 +157,11 @@ func Build(inputs []Input, state config.State, sessions []Session, defaultStatus
 	})
 	return workstreams, nil
 }
+
+// Summarize reduces per-block agents to the most urgent state. Unknown agents
+// do not outrank a known state; if every agent is unknown, the result is
+// unknown. No agents means the session is idle.
+func Summarize(agents []Agent) (AgentState, string) { return summarize(agents) }
 
 // summarize reduces per-block agents to the most urgent state. Unknown agents
 // do not outrank a known state; if every agent is unknown, the result is

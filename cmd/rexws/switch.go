@@ -8,8 +8,8 @@ import (
 
 	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/git"
+	"github.com/danrabinowitz/rexws/internal/ops"
 	"github.com/danrabinowitz/rexws/internal/pathutil"
-	"github.com/danrabinowitz/rexws/internal/rex"
 )
 
 func newSwitchCmd() *cobra.Command {
@@ -58,7 +58,7 @@ func newSwitchCmd() *cobra.Command {
 			if selectedClient == "" {
 				selectedClient = cfg.RexAppClient()
 			}
-			result, err := rex.New(cfg.RexBinary()).Switch(cmd.Context(), name, path, selectedClient, window)
+			result, err := ops.SwitchWorkstreamWithClient(cmd.Context(), cfg, selectedClient, name, path, window)
 			if err != nil {
 				return err
 			}

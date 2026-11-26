@@ -66,6 +66,23 @@ func render(value string, data Data) (string, error) {
 	return buf.String(), nil
 }
 
+// Command builds an exec.Cmd for a rendered provider command. It does not run
+// the command and does not touch stdio, so a TUI can hand the process to
+// tea.ExecProcess for full terminal control.
+func Command(args []string, workdir string) (*exec.Cmd, error) {
+	if len(args) == 0 {
+		return nil, errors.New("provider command is empty")
+	}
+	if strings.TrimSpace(args[0]) == "" {
+		return nil, errors.New("provider command name is empty")
+	}
+	cmd := exec.Command(args[0], args[1:]...)
+	if workdir != "" {
+		cmd.Dir = workdir
+	}
+	return cmd, nil
+}
+
 // Run executes a rendered command with the caller's stdio. It does not use a
 // shell, so the rendered arguments are passed to the program unchanged.
 func Run(ctx context.Context, args []string, workdir string, stdin io.Reader, stdout, stderr io.Writer) error {

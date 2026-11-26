@@ -325,7 +325,7 @@ Modals capture keys before search or normal mode.
 
 | Mode | Keys |
 | --- | --- |
-| Status selector | `↑`/`↓` move; `1..9` shortcuts where available; `Enter` apply; `Esc` cancel |
+| Status selector | `↑`/`↓` move; `1..9` apply immediately where available; `Enter` apply the highlighted status; `Esc` cancel |
 | Remove confirmation | `y` or `Enter` confirm; `n` or `Esc` cancel |
 | Help | Scroll with `↑`/`↓`/`PgUp`/`PgDn`; `?` or `Esc` close |
 | New worktree | Form keys; `Enter` continue; `Esc` cancel; provider scripts via `tea.ExecProcess` |
@@ -344,8 +344,10 @@ Status selector details:
 
 - The current status is highlighted.
 - Applying the current status is a no-op and does not change `updated_at`.
-- With more than nine statuses, number keys cover the first nine; use arrows for
-  the rest.
+- `1..9` apply the corresponding status immediately, as a shortcut. With more
+  than nine statuses, number keys cover the first nine; use arrows for the rest.
+- `Enter` applies the highlighted status (after moving with `↑`/`↓` or a number
+  key).
 - The selector applies to the workstream of the selected row.
 
 ## 6. Search

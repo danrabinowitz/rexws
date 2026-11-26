@@ -68,6 +68,29 @@ func TestRenderWorkdir(t *testing.T) {
 	}
 }
 
+func TestCommand(t *testing.T) {
+	cmd, err := Command([]string{"git", "worktree", "add", "-b", "feat", "/tmp/wt"}, "/code/repo")
+	if err != nil {
+		t.Fatalf("Command: %v", err)
+	}
+	if cmd.Dir != "/code/repo" {
+		t.Errorf("Dir = %q", cmd.Dir)
+	}
+	if got := strings.Join(cmd.Args, "\x00"); got != "git\x00worktree\x00add\x00-b\x00feat\x00/tmp/wt" {
+		t.Errorf("Args = %q", cmd.Args)
+	}
+	if cmd.Stdin != nil || cmd.Stdout != nil || cmd.Stderr != nil {
+		t.Error("Command must leave stdio for the caller")
+	}
+
+	if _, err := Command(nil, ""); err == nil {
+		t.Error("empty command accepted")
+	}
+	if _, err := Command([]string{" "}, ""); err == nil {
+		t.Error("blank command name accepted")
+	}
+}
+
 func TestRun(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer

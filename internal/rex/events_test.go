@@ -1,6 +1,7 @@
 package rex
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -20,6 +21,18 @@ const (
 	titleChangedLine = `{"type":"session_event","payload":{"session_id":"session:s1","event":{"type":"block_event","payload":{"block_id":"block:b1","creator_name":"com.superlogical.terminal","name":"title_changed","payload":{"title":"/tmp","owner":{"pid":1,"name":"zsh"}}}}}}`
 
 	clientConnectedLine = `{"type":"session_event","payload":{"session_id":"session:s1","event":{"type":"client_connected","payload":{"client_id":"client:c1"}}}}`
+
+	// Window and view fixtures below are copied from a scratch session probed
+	// with rex 0.1.0-preview.25 (rex window new/rename/focus/close).
+	sessionViewChangedLine = `{"type":"session_event","payload":{"session_id":"session:s1","event":{"type":"session_view_changed","payload":{"revision":3}}}}`
+
+	activeWindowChangedLine = `{"type":"session_event","payload":{"session_id":"session:s1","event":{"type":"active_window_changed","payload":{"window_id":"window:w2"}}}}`
+
+	windowCreatedLine = `{"type":"session_event","payload":{"session_id":"session:s1","event":{"type":"window_created","payload":{"window_id":"window:w2","label":"probe-two"}}}}`
+
+	windowClosedLine = `{"type":"session_event","payload":{"session_id":"session:s1","event":{"type":"window_closed","payload":{"window_id":"window:w2"}}}}`
+
+	windowLabelChangedLine = `{"type":"session_event","payload":{"session_id":"session:s1","event":{"type":"window_label_changed","payload":{"window_id":"window:w2","label":"renamed-two"}}}}`
 )
 
 func TestParseEventSessionLifecycle(t *testing.T) {
@@ -79,6 +92,47 @@ func TestParseEventProgramStatusRemoved(t *testing.T) {
 	}
 	if len(event.RemovedIDs) != 2 || event.RemovedIDs[0] != "" || event.RemovedIDs[1] != "build" {
 		t.Errorf("removed ids = %#v", event.RemovedIDs)
+	}
+}
+
+func TestParseEventWindowAndViewEvents(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want Event
+	}{
+		{"view changed", sessionViewChangedLine, Event{Type: EventSessionViewChanged, SessionID: "session:s1", Revision: 3}},
+		{"active window", activeWindowChangedLine, Event{Type: EventActiveWindowChanged, SessionID: "session:s1", WindowID: "window:w2"}},
+		{"window created", windowCreatedLine, Event{Type: EventWindowCreated, SessionID: "session:s1", WindowID: "window:w2", WindowLabel: "probe-two"}},
+		{"window closed", windowClosedLine, Event{Type: EventWindowClosed, SessionID: "session:s1", WindowID: "window:w2"}},
+		{"window label changed", windowLabelChangedLine, Event{Type: EventWindowLabelChanged, SessionID: "session:s1", WindowID: "window:w2", WindowLabel: "renamed-two"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			event, ok, err := ParseEvent([]byte(test.line))
+			if err != nil || !ok {
+				t.Fatalf("ok=%v err=%v", ok, err)
+			}
+			if !reflect.DeepEqual(event, test.want) {
+				t.Errorf("event = %#v, want %#v", event, test.want)
+			}
+		})
+	}
+}
+
+func TestParseEventRejectsMalformedWindowEvents(t *testing.T) {
+	for name, line := range map[string]string{
+		"created without id": `{"type":"session_event","payload":{"session_id":"s","event":{"type":"window_created","payload":{"label":"x"}}}}`,
+		"closed without id":  `{"type":"session_event","payload":{"session_id":"s","event":{"type":"window_closed","payload":{}}}}`,
+		"label without id":   `{"type":"session_event","payload":{"session_id":"s","event":{"type":"window_label_changed","payload":{"label":"x"}}}}`,
+		"active window bad":  `{"type":"session_event","payload":{"session_id":"s","event":{"type":"active_window_changed","payload":[]}}}`,
+		"view changed bad":   `{"type":"session_event","payload":{"session_id":"s","event":{"type":"session_view_changed","payload":[]}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, ok, err := ParseEvent([]byte(line)); err == nil {
+				t.Errorf("expected an error, ok=%v", ok)
+			}
+		})
 	}
 }
 

@@ -12,7 +12,8 @@ import (
 
 	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/core"
-	"github.com/danrabinowitz/rexws/internal/git"
+	"github.com/danrabinowitz/rexws/internal/ops"
+	"github.com/danrabinowitz/rexws/internal/tui"
 )
 
 func main() {
@@ -29,11 +30,11 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(cmd.ErrOrStderr(), "The interactive dashboard arrives in Milestone 4. Use `rexws list` for now.")
-			return cmd.Help()
+			return tui.Run()
 		},
 	}
 	cmd.AddCommand(
+		newTuiCmd(),
 		newListCmd(),
 		newProjectCmd(),
 		newStatusCmd(),
@@ -44,17 +45,26 @@ func newRootCmd() *cobra.Command {
 	return cmd
 }
 
-// discover reads the worktrees of every registered project.
-func discover(ctx context.Context, cfg config.Config) ([]core.Input, error) {
-	inputs := make([]core.Input, 0, len(cfg.Projects))
-	for _, project := range cfg.SortedProjects() {
-		worktrees, err := git.ListWorktrees(ctx, project.Path)
-		if err != nil {
-			return nil, fmt.Errorf("project %s: %w", project.Name, err)
-		}
-		inputs = append(inputs, core.Input{Project: project, Worktrees: worktrees})
+func newTuiCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "tui",
+		Short: "Launch the interactive dashboard",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return tui.Run()
+		},
 	}
-	return inputs, nil
+}
+
+// discover reads the worktrees of every registered project. The CLI treats a
+// project that cannot be read as fatal; the TUI uses ops.Discover directly and
+// keeps the readable projects.
+func discover(ctx context.Context, cfg config.Config) ([]core.Input, error) {
+	discovery := ops.Discover(ctx, cfg)
+	if err := discovery.Err(); err != nil {
+		return nil, err
+	}
+	return discovery.Inputs, nil
 }
 
 // encodeJSON writes an indented JSON document followed by a newline.

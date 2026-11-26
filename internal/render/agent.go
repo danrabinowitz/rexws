@@ -48,10 +48,82 @@ func (Counts) Format(ws core.Workstream) string {
 	if len(ws.Agents) == 0 {
 		return "idle"
 	}
+	return formatAgents(ws.Agents)
+}
 
-	groups := make([]agentGroup, 0, len(ws.Agents))
-	index := make(map[agentKey]int, len(ws.Agents))
+// FormatWindowAgents renders one window's agents with the same option-A rules
+// as the parent badge, considering only agents whose WindowID is windowID. A
+// window with no reporting agents renders as an em dash.
+func FormatWindowAgents(ws core.Workstream, windowID string) string {
+	agents := windowAgents(ws, windowID)
+	if len(agents) == 0 {
+		return "—"
+	}
+	return formatAgents(agents)
+}
+
+// DisplayApp is the app name shown for an agent: App when Rex reported one,
+// otherwise EffectiveApp. Callers that need a hidden EffectiveApp (search)
+// should inspect App directly.
+func DisplayApp(agent core.Agent) string {
+	if agent.App != "" {
+		return agent.App
+	}
+	return agent.EffectiveApp
+}
+
+// WindowApp returns the app name shown for a window: the focused block's app
+// when that block is an agent, otherwise the app of the agent that determines
+// the window's highest severity. It returns an em dash when neither exists.
+func WindowApp(ws core.Workstream, window core.Window) string {
 	for _, agent := range ws.Agents {
+		if agent.WindowID == window.ID && agent.BlockID == window.FocusedBlockID {
+			if app := DisplayApp(agent); app != "" {
+				return app
+			}
+			break
+		}
+	}
+	var best *core.Agent
+	for i := range ws.Agents {
+		agent := &ws.Agents[i]
+		if agent.WindowID != window.ID {
+			continue
+		}
+		if best == nil || agentSeverity(*agent) > agentSeverity(*best) {
+			best = agent
+		}
+	}
+	if best != nil {
+		if app := DisplayApp(*best); app != "" {
+			return app
+		}
+	}
+	return "—"
+}
+
+func windowAgents(ws core.Workstream, windowID string) []core.Agent {
+	agents := make([]core.Agent, 0, len(ws.Agents))
+	for _, agent := range ws.Agents {
+		if agent.WindowID == windowID {
+			agents = append(agents, agent)
+		}
+	}
+	return agents
+}
+
+func agentSeverity(agent core.Agent) int {
+	state := agent.State
+	if state == "" {
+		state = core.AgentUnknown
+	}
+	return state.Severity()
+}
+
+func formatAgents(agents []core.Agent) string {
+	groups := make([]agentGroup, 0, len(agents))
+	index := make(map[agentKey]int, len(agents))
+	for _, agent := range agents {
 		state := agent.State
 		if state == "" {
 			state = core.AgentUnknown
@@ -71,7 +143,7 @@ func (Counts) Format(ws core.Workstream) string {
 		return groups[i].key.state.Severity() > groups[j].key.state.Severity()
 	})
 
-	multiple := len(ws.Agents) > 1
+	multiple := len(agents) > 1
 	parts := make([]string, 0, len(groups))
 	for _, group := range groups {
 		label := stateLabel(group.key)

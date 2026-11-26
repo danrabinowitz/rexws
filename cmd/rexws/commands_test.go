@@ -86,6 +86,214 @@ func testConfig(t *testing.T, repo, worktreeRoot, provider string) {
 	}
 }
 
+// fakeRexNew writes a rex stub for the new --switch flow. clientList and
+// sessionList are returned verbatim; every call is logged so tests can assert
+// the creation and select arguments.
+func fakeRexNew(t *testing.T, clientList, sessionList string) string {
+	t.Helper()
+	logPath := filepath.Join(t.TempDir(), "rex.log")
+	t.Setenv("FAKE_REX_LOG", logPath)
+	t.Setenv(config.EnvRexClient, "")
+	script := `#!/bin/sh
+log="$FAKE_REX_LOG"
+case "$*" in
+  "client ls --json") printf 'client-ls\n' >> "$log"; printf '%s\n' '` + clientList + `' ;;
+  "session ls --json") printf 'session-ls\n' >> "$log"; printf '%s\n' '` + sessionList + `' ;;
+  "session new "*) printf 'new:%s\n' "$*" >> "$log"; printf '%s\n' '{"session_id":"session:new"}' ;;
+  *"session.select"*) printf 'select:%s\n' "$*" >> "$log" ;;
+  *) printf 'unexpected: %s\n' "$*" >&2; exit 1 ;;
+esac
+`
+	bin := filepath.Join(t.TempDir(), "rex")
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.EnvRexBin, bin)
+	return logPath
+}
+
+func readCalls(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read calls: %v", err)
+	}
+	return string(data)
+}
+
+func TestNewSwitchCreatesSession(t *testing.T) {
+	repo := testRepo(t)
+	root := filepath.Join(t.TempDir(), "worktrees")
+	testConfig(t, repo, root, "")
+	logPath := fakeRexNew(t,
+		`{"clients":[{"client_id":"client:app","info":{"kind":"app"}}]}`,
+		`{"sessions":[]}`,
+	)
+
+	stdout, stderr, err := runCLI(t, "new", "repo", "feat/switch", "--switch", "--json")
+	if err != nil {
+		t.Fatalf("new --switch: %v\nstderr: %s", err, stderr)
+	}
+	var result struct {
+		Project        string `json:"project"`
+		Branch         string `json:"branch"`
+		Path           string `json:"path"`
+		Provider       string `json:"provider"`
+		SessionID      string `json:"session_id"`
+		SessionCreated *bool  `json:"session_created"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("parse JSON %q: %v", stdout, err)
+	}
+	wantPath, err := pathutil.Canonical(filepath.Join(root, "feat", "switch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Project != "repo" || result.Branch != "feat/switch" || result.Path != wantPath || result.Provider != "git" {
+		t.Errorf("result = %#v", result)
+	}
+	if result.SessionID != "session:new" || result.SessionCreated == nil || !*result.SessionCreated {
+		t.Errorf("session fields = (%q, %v)", result.SessionID, result.SessionCreated)
+	}
+
+	calls := readCalls(t, logPath)
+	if !strings.Contains(calls, "client-ls") {
+		t.Errorf("app client was not resolved before creating: %q", calls)
+	}
+	if !strings.Contains(calls, "new:session new repo/feat/switch -c "+wantPath+" --json") {
+		t.Errorf("session creation args = %q", calls)
+	}
+	if !strings.Contains(calls, "select:-C client:app do session.select session_id=session:new") {
+		t.Errorf("session select args = %q", calls)
+	}
+}
+
+func TestNewSwitchSelectsExistingSession(t *testing.T) {
+	repo := testRepo(t)
+	root := filepath.Join(t.TempDir(), "worktrees")
+	testConfig(t, repo, root, "")
+	logPath := fakeRexNew(t,
+		`{"clients":[{"client_id":"client:app","info":{"kind":"app"}}]}`,
+		`{"sessions":[{"session_id":"session:existing","label":"repo/feat/existing"}]}`,
+	)
+
+	stdout, stderr, err := runCLI(t, "new", "repo", "feat/existing", "--switch", "--json")
+	if err != nil {
+		t.Fatalf("new --switch: %v\nstderr: %s", err, stderr)
+	}
+	var result struct {
+		SessionID      string `json:"session_id"`
+		SessionCreated *bool  `json:"session_created"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("parse JSON %q: %v", stdout, err)
+	}
+	if result.SessionID != "session:existing" || result.SessionCreated == nil || *result.SessionCreated {
+		t.Errorf("session fields = (%q, %v)", result.SessionID, result.SessionCreated)
+	}
+	calls := readCalls(t, logPath)
+	if strings.Contains(calls, "new:") {
+		t.Errorf("existing session was recreated: %q", calls)
+	}
+	if !strings.Contains(calls, "select:-C client:app do session.select session_id=session:existing") {
+		t.Errorf("select args = %q", calls)
+	}
+}
+
+func TestNewSwitchUsesExplicitClient(t *testing.T) {
+	repo := testRepo(t)
+	root := filepath.Join(t.TempDir(), "worktrees")
+	testConfig(t, repo, root, "")
+	logPath := fakeRexNew(t,
+		`{"clients":[{"client_id":"client:other","info":{"kind":"app"}}]}`,
+		`{"sessions":[]}`,
+	)
+
+	_, stderr, err := runCLI(t, "new", "repo", "feat/explicit", "--switch", "--client", "client:explicit", "--json")
+	if err != nil {
+		t.Fatalf("new --switch --client: %v\nstderr: %s", err, stderr)
+	}
+	calls := readCalls(t, logPath)
+	if strings.Contains(calls, "client-ls") {
+		t.Errorf("explicit client still resolved the first app: %q", calls)
+	}
+	if !strings.Contains(calls, "select:-C client:explicit do session.select session_id=session:new") {
+		t.Errorf("select args = %q", calls)
+	}
+}
+
+func TestNewSwitchRequiresAppClientBeforeCreating(t *testing.T) {
+	repo := testRepo(t)
+	root := filepath.Join(t.TempDir(), "worktrees")
+	testConfig(t, repo, root, "")
+	fakeRexNew(t, `{"clients":[]}`, `{"sessions":[]}`)
+
+	_, _, err := runCLI(t, "new", "repo", "feat/noapp", "--switch")
+	if err == nil || !strings.Contains(err.Error(), "needs a Rex app client") {
+		t.Fatalf("err = %v, want an app-client error", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "feat", "noapp")); !os.IsNotExist(statErr) {
+		t.Errorf("worktree was created before the app-client check: %v", statErr)
+	}
+}
+
+func TestNewClientRequiresSwitch(t *testing.T) {
+	repo := testRepo(t)
+	root := filepath.Join(t.TempDir(), "worktrees")
+	testConfig(t, repo, root, "")
+
+	_, _, err := runCLI(t, "new", "repo", "feat/client", "--client", "client:app")
+	if err == nil || !strings.Contains(err.Error(), "--client requires --switch") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "feat", "client")); !os.IsNotExist(statErr) {
+		t.Errorf("worktree was created despite the flag error: %v", statErr)
+	}
+}
+
+func TestNewSwitchHumanOutput(t *testing.T) {
+	repo := testRepo(t)
+	root := filepath.Join(t.TempDir(), "worktrees")
+	testConfig(t, repo, root, "")
+	fakeRexNew(t, `{"clients":[{"client_id":"client:app","info":{"kind":"app"}}]}`, `{"sessions":[]}`)
+
+	stdout, stderr, err := runCLI(t, "new", "repo", "feat/human", "--switch")
+	if err != nil {
+		t.Fatalf("new --switch: %v\nstderr: %s", err, stderr)
+	}
+	wantPath, err := pathutil.Canonical(filepath.Join(root, "feat", "human"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "Created worktree feat/human at "+wantPath) {
+		t.Errorf("stdout = %q, want the worktree line", stdout)
+	}
+	if !strings.Contains(stdout, "Created and switched to Rex session session:new") {
+		t.Errorf("stdout = %q, want the created-session line", stdout)
+	}
+}
+
+func TestNewSwitchHumanOutputExistingSession(t *testing.T) {
+	repo := testRepo(t)
+	root := filepath.Join(t.TempDir(), "worktrees")
+	testConfig(t, repo, root, "")
+	fakeRexNew(t,
+		`{"clients":[{"client_id":"client:app","info":{"kind":"app"}}]}`,
+		`{"sessions":[{"session_id":"session:existing","label":"repo/feat/again"}]}`,
+	)
+
+	stdout, stderr, err := runCLI(t, "new", "repo", "feat/again", "--switch")
+	if err != nil {
+		t.Fatalf("new --switch: %v\nstderr: %s", err, stderr)
+	}
+	if !strings.Contains(stdout, "Switched to Rex session session:existing") {
+		t.Errorf("stdout = %q", stdout)
+	}
+	if strings.Contains(stdout, "Created and switched") {
+		t.Errorf("stdout claims a new session: %q", stdout)
+	}
+}
+
 func TestNewCreatesWorktree(t *testing.T) {
 	repo := testRepo(t)
 	root := filepath.Join(t.TempDir(), "worktrees")
@@ -110,6 +318,10 @@ func TestNewCreatesWorktree(t *testing.T) {
 	}
 	if result.Project != "repo" || result.Branch != "feat/auth" || result.Path != want || result.Provider != "git" {
 		t.Errorf("result = %#v", result)
+	}
+	// Without --switch the JSON shape must not gain the session fields.
+	if strings.Contains(stdout, "session_id") || strings.Contains(stdout, "session_created") {
+		t.Errorf("default new JSON changed: %q", stdout)
 	}
 
 	worktrees, err := git.ListWorktrees(context.Background(), repo)
