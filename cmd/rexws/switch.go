@@ -51,7 +51,11 @@ func newSwitchCmd() *cobra.Command {
 				return err
 			}
 
-			result, err := rex.New().Switch(cmd.Context(), name, path, client)
+			selectedClient := client
+			if selectedClient == "" {
+				selectedClient = cfg.RexAppClient()
+			}
+			result, err := rex.New(cfg.RexBinary()).Switch(cmd.Context(), name, path, selectedClient)
 			if err != nil {
 				return err
 			}
@@ -70,7 +74,7 @@ func newSwitchCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&client, "client", "", "Rex client label or ID (default: first connected Rex app)")
+	cmd.Flags().StringVar(&client, "client", "", "Rex client label or ID (default: rex_client config, then the first connected Rex app)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON")
 	return cmd
 }

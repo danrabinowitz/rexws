@@ -23,7 +23,7 @@ func TestLiveSessionAgents(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	blocks, err := New().SessionAgents(ctx, sessionID)
+	blocks, err := New("").SessionAgents(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("SessionAgents: %v", err)
 	}

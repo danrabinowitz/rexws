@@ -5,9 +5,14 @@ import (
 	"path/filepath"
 )
 
-// EnvDir overrides the rexws configuration directory. It exists for tests and
-// for running against a scratch directory; normal use reads ~/.config/rexws.
-const EnvDir = "REXWS_CONFIG_DIR"
+// Environment overrides. EnvDir exists for tests and for running against a
+// scratch directory; the Rex values are read at call time so they are never
+// written back to config.json.
+const (
+	EnvDir       = "REXWS_CONFIG_DIR"
+	EnvRexBin    = "REXWS_REX_BIN"
+	EnvRexClient = "REXWS_REX_CLIENT"
+)
 
 // Dir returns the directory that holds config.json and state.json.
 func Dir() (string, error) {

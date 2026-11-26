@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os/exec"
 	"strings"
 )
@@ -157,8 +158,8 @@ func (c *Client) Stream(ctx context.Context, sessionID string, handle func(Event
 		return err
 	}
 	if err := cmd.Start(); err != nil {
-		if errors.Is(err, exec.ErrNotFound) {
-			return errors.New("rex was not found on PATH")
+		if errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("rex binary %q was not found", c.bin())
 		}
 		return fmt.Errorf("start rex events: %w", err)
 	}

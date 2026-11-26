@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os/exec"
 	"strings"
 	"time"
@@ -28,9 +29,12 @@ type Client struct {
 	Timeout time.Duration
 }
 
-// New returns a client that uses the rex binary on PATH.
-func New() *Client {
-	return &Client{Bin: "rex", Timeout: defaultTimeout}
+// New returns a client for bin. An empty bin means "rex" from PATH.
+func New(bin string) *Client {
+	if bin == "" {
+		bin = "rex"
+	}
+	return &Client{Bin: bin, Timeout: defaultTimeout}
 }
 
 // Session is one Rex session.
@@ -351,8 +355,8 @@ func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	out, err := cmd.Output()
 	if err != nil {
 		switch {
-		case errors.Is(err, exec.ErrNotFound):
-			return nil, errors.New("rex was not found on PATH")
+		case errors.Is(err, exec.ErrNotFound), errors.Is(err, fs.ErrNotExist):
+			return nil, fmt.Errorf("rex binary %q was not found", c.bin())
 		case errors.Is(ctx.Err(), context.DeadlineExceeded):
 			return nil, fmt.Errorf("rex %s timed out after %s", strings.Join(args, " "), timeout)
 		}

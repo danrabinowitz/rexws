@@ -60,6 +60,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if project.Name != "repo" || project.Path != repo {
 		t.Errorf("project = %#v", project)
 	}
+	cfg.RexBin = "/opt/rex"
+	cfg.RexClient = "studio"
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -70,6 +72,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if len(loaded.Projects) != 1 || loaded.Projects[0] != project {
 		t.Errorf("projects = %#v, want %#v", loaded.Projects, []Project{project})
+	}
+	if loaded.RexBin != "/opt/rex" || loaded.RexClient != "studio" {
+		t.Errorf("rex settings did not round-trip: bin=%q client=%q", loaded.RexBin, loaded.RexClient)
 	}
 	if loaded.DefaultProvider != "git" {
 		t.Errorf("DefaultProvider = %q", loaded.DefaultProvider)
@@ -344,6 +349,61 @@ func TestLoadStateRejectsRemovedStatus(t *testing.T) {
 	for _, want := range []string{"/worktree", "in_progress"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+func TestRexRuntimeSettings(t *testing.T) {
+	t.Setenv(EnvRexBin, "")
+	t.Setenv(EnvRexClient, "")
+
+	cfg := Default()
+	if got := cfg.RexBinary(); got != "rex" {
+		t.Errorf("default RexBinary = %q, want rex", got)
+	}
+	if got := cfg.RexAppClient(); got != "" {
+		t.Errorf("default RexAppClient = %q, want empty", got)
+	}
+
+	cfg.RexBin = "/opt/rex"
+	cfg.RexClient = "studio"
+	if got := cfg.RexBinary(); got != "/opt/rex" {
+		t.Errorf("config RexBinary = %q", got)
+	}
+	if got := cfg.RexAppClient(); got != "studio" {
+		t.Errorf("config RexAppClient = %q", got)
+	}
+
+	t.Setenv(EnvRexBin, "/env/rex")
+	t.Setenv(EnvRexClient, "env-client")
+	if got := cfg.RexBinary(); got != "/env/rex" {
+		t.Errorf("environment RexBinary = %q", got)
+	}
+	if got := cfg.RexAppClient(); got != "env-client" {
+		t.Errorf("environment RexAppClient = %q", got)
+	}
+}
+
+func TestRexEnvIsNotPersisted(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(EnvDir, dir)
+	t.Setenv(EnvRexBin, "/env/rex")
+	t.Setenv(EnvRexClient, "env-client")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, unwanted := range []string{"/env/rex", "env-client"} {
+		if strings.Contains(string(data), unwanted) {
+			t.Errorf("config.json persisted the environment override %q: %s", unwanted, data)
 		}
 	}
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os/exec"
 
 	"github.com/spf13/cobra"
 
@@ -39,7 +38,7 @@ func newListCmd() *cobra.Command {
 				return err
 			}
 
-			sessions, warnings := rexSessions(cmd)
+			sessions, warnings := rexSessions(cmd, rex.New(cfg.RexBinary()))
 			workstreams, err := core.Build(inputs, state, sessions, cfg.DefaultStatusValue())
 			if err != nil {
 				return err
@@ -81,12 +80,8 @@ func newListCmd() *cobra.Command {
 
 // rexSessions reads Rex state. A missing or stopped Rex server degrades to
 // warnings rather than hiding the Git workstreams.
-func rexSessions(cmd *cobra.Command) ([]core.Session, []string) {
-	if _, err := exec.LookPath("rex"); err != nil {
-		return nil, []string{fmt.Sprintf("Rex unavailable: %v", err)}
-	}
-
-	snapshot, err := rex.New().Snapshot(cmd.Context())
+func rexSessions(cmd *cobra.Command, client *rex.Client) ([]core.Session, []string) {
+	snapshot, err := client.Snapshot(cmd.Context())
 	if err != nil {
 		return nil, []string{fmt.Sprintf("Rex unavailable: %v", err)}
 	}

@@ -33,6 +33,8 @@ type Project struct {
 // Config is the content of config.json.
 type Config struct {
 	DefaultProvider string              `json:"default_provider"`
+	RexBin          string              `json:"rex_bin,omitempty"`
+	RexClient       string              `json:"rex_client,omitempty"`
 	Providers       map[string]Provider `json:"providers"`
 	Statuses        []StatusDef         `json:"statuses"`
 	DefaultStatus   Status              `json:"default_status"`
@@ -191,6 +193,28 @@ func (c Config) ProviderFor(p Project) string {
 		return c.DefaultProvider
 	}
 	return "git"
+}
+
+// RexBinary returns the rex executable to run. Precedence is REXWS_REX_BIN,
+// then rex_bin in config.json, then "rex" from PATH.
+func (c Config) RexBinary() string {
+	if bin := os.Getenv(EnvRexBin); bin != "" {
+		return bin
+	}
+	if c.RexBin != "" {
+		return c.RexBin
+	}
+	return "rex"
+}
+
+// RexAppClient returns the Rex app client to target. Precedence is
+// REXWS_REX_CLIENT, then rex_client in config.json, then empty, which lets the
+// caller fall back to the first connected Rex app.
+func (c Config) RexAppClient() string {
+	if client := os.Getenv(EnvRexClient); client != "" {
+		return client
+	}
+	return c.RexClient
 }
 
 // SortedProjects returns a copy of the projects sorted by name.

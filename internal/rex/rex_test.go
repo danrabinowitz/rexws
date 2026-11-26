@@ -2,6 +2,15 @@ package rex
 
 import "testing"
 
+func TestNew(t *testing.T) {
+	if got := New("").Bin; got != "rex" {
+		t.Errorf("New(\"\").Bin = %q, want rex", got)
+	}
+	if got := New("/opt/rex").Bin; got != "/opt/rex" {
+		t.Errorf("New(path).Bin = %q", got)
+	}
+}
+
 func TestChooseRecord(t *testing.T) {
 	tests := []struct {
 		name    string
