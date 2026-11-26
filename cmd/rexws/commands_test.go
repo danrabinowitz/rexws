@@ -67,6 +67,8 @@ func testRepo(t *testing.T) string {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git commit: %v\n%s", err, out)
 	}
+	// Pin the default branch so tests do not depend on init.defaultBranch.
+	gitRun(t, repo, "branch", "-M", "main")
 	return repo
 }
 

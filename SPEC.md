@@ -139,7 +139,7 @@ Running `rexws` with no arguments launches the TUI. Subcommands expose the same 
 | `rexws switch <selector>` | Jump to (or create) the Rex session for a workstream. |
 | `rexws status <selector> <stage>` | Set workflow status (`in_progress`, `blocked`, `in_review`, `ready`, `done`). |
 | `rexws new <project> <branch> [--switch] [--client]` | Create a worktree using the project's configured provider. With `--switch`, also create or select the Rex session `<project>/<branch>` in the new worktree; `--client` chooses the Rex app client for that switch. |
-| `rexws rm <selector>` | Close Rex session (if running), run provider's `remove`, clean `state.json`. |
+| `rexws rm <selector> [--force] [--yes] [--delete-branch] [--json]` | Close Rex session (if running), re-verify the worktree, run the provider's `remove`, clean `state.json`. `--force` prints discarded paths and unique detached-HEAD commits and confirms; retained-branch state is reported separately. `--delete-branch` is the only branch-deletion path and deletes the branch only when merged or patch-equivalent to the default branch; an unmerged branch is never deleted. A provider `remove` must not delete the branch. |
 | `rexws project add <path>` | Register a Git repo in `config.json`. |
 
 ---

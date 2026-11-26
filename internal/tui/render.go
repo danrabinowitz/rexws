@@ -240,7 +240,14 @@ func renderNotice(s State, width int, t theme) (string, bool) {
 		available = 1
 	}
 	text := truncate(" "+render.Sanitize(shown.text), available)
-	return t.Notice(shown.persistent).Render(text) + t.muted().Render(suffix), true
+	style := t.Notice(shown.persistent)
+	switch {
+	case shown.info && !shown.persistent:
+		style = t.info()
+	case shown.warning && !shown.persistent:
+		style = t.warning()
+	}
+	return style.Render(text) + t.muted().Render(suffix), true
 }
 
 func renderBody(s State, width, height int, t theme) string {
@@ -937,12 +944,54 @@ func renderRemoveModal(s State, width, height int, t theme) string {
 	) {
 		lines = append(lines, line)
 	}
-	skipped := 0
+
+	// The exact loss, retained state, and action list come from the plan, the
+	// same source the CLI prints, so the confirmation cannot disagree.
+	block := []string{"", "Loss:"}
+	for _, line := range modal.plan.LossLines() {
+		block = append(block, modalWrappedLine(render.Sanitize(line), contentWidth)...)
+	}
+	if retained := modal.plan.RetainedLines(); len(retained) > 0 {
+		block = append(block, "", "Retained:")
+		for _, line := range retained {
+			block = append(block, modalWrappedLine(render.Sanitize(line), contentWidth)...)
+		}
+	}
+	block = append(block, "", "Actions:")
+	for _, line := range modal.plan.ActionLines() {
+		block = append(block, modalWrappedLine(render.Sanitize(line), contentWidth)...)
+	}
+
+	wrappedWarnings := make([][]string, 0, len(modal.plan.Warnings))
 	for _, warning := range modal.plan.Warnings {
 		if warning == nil {
 			continue
 		}
-		wrapped := wrapText("Warning: "+render.Sanitize(warning.Error()), contentWidth)
+		wrappedWarnings = append(wrappedWarnings, wrapText("Warning: "+render.Sanitize(warning.Error()), contentWidth))
+	}
+
+	// Keep at least the first warning on screen; truncate the plan block
+	// instead of hiding every warning behind a count.
+	reserve := 0
+	if len(wrappedWarnings) > 0 {
+		reserve = 1 + len(wrappedWarnings[0])
+		if reserve > maxBody {
+			reserve = maxBody
+		}
+	}
+	maxBlock := max(0, maxBody-len(lines)-reserve)
+	if len(block) > maxBlock {
+		if maxBlock == 0 {
+			block = nil
+		} else {
+			hidden := len(block) - maxBlock + 1
+			block = append(block[:maxBlock-1], fmt.Sprintf("%s %d more line(s) not shown", t.glyphs.ellipsis, hidden))
+		}
+	}
+	lines = append(lines, block...)
+
+	skipped := 0
+	for _, wrapped := range wrappedWarnings {
 		if len(lines)+1+len(wrapped) <= maxBody {
 			lines = append(lines, "")
 			lines = append(lines, wrapped...)
@@ -959,6 +1008,21 @@ func renderRemoveModal(s State, width, height int, t theme) string {
 		}
 	}
 	return renderModalBox("Remove workstream", t.danger(), lines, width, height, t)
+}
+
+// modalWrappedLine wraps one plan line, preserving its leading indentation.
+func modalWrappedLine(line string, width int) []string {
+	indent := line[:len(line)-len(strings.TrimLeft(line, " "))]
+	text := strings.TrimSpace(line)
+	if text == "" {
+		return []string{""}
+	}
+	inner := max(1, width-lipgloss.Width(indent))
+	var out []string
+	for _, wrapped := range wrapText(text, inner) {
+		out = append(out, indent+wrapped)
+	}
+	return out
 }
 
 func renderNewForm(s State, width, height int, t theme) string {

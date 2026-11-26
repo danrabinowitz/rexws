@@ -267,9 +267,9 @@ esac
 	if selector != "path:"+detachedPath {
 		t.Fatalf("detached selector = %q, want the path form", selector)
 	}
-	plan, err = PrepareRemove(context.Background(), cfg, selector)
+	plan, err = PrepareRemoveWithOptions(context.Background(), cfg, selector, RemoveOptions{Force: true})
 	if err != nil {
-		t.Fatalf("PrepareRemove(%q): %v", selector, err)
+		t.Fatalf("PrepareRemoveWithOptions(%q): %v", selector, err)
 	}
 	if plan.Path != detachedPath {
 		t.Errorf("plan path = %q, want %q", plan.Path, detachedPath)

@@ -84,6 +84,41 @@ func TestDefaultBranch(t *testing.T) {
 	}
 }
 
+func TestUnpushedCommits(t *testing.T) {
+	repo := refsRepo(t)
+	refsRun(t, repo, "branch", "-M", "main")
+	refsRun(t, repo, "checkout", "-q", "-b", "feat")
+	refsCommitFile(t, repo, "feat.txt", "feat\n", "feat work")
+	featSHA := strings.TrimSpace(gitString(t, repo, "rev-parse", "HEAD"))
+
+	commits, err := UnpushedCommits(context.Background(), repo, "main", "feat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commits) != 1 || commits[0].SHA != featSHA || commits[0].Subject != "feat work" {
+		t.Fatalf("commits = %#v; want the branch's one commit", commits)
+	}
+
+	// A remote-tracking ref that contains the commit makes it pushed.
+	refsRun(t, repo, "update-ref", "refs/remotes/origin/feat", featSHA)
+	commits, err = UnpushedCommits(context.Background(), repo, "main", "feat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commits) != 0 {
+		t.Fatalf("commits after remote ref = %#v; want none", commits)
+	}
+
+	// A branch with no commits beyond the default has nothing unpushed.
+	commits, err = UnpushedCommits(context.Background(), repo, "main", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commits) != 0 {
+		t.Fatalf("default branch commits = %#v; want none", commits)
+	}
+}
+
 func TestIsAncestorPatchEquivalentAndCommitsOutside(t *testing.T) {
 	repo := refsRepo(t)
 	refsRun(t, repo, "branch", "-M", "main")
@@ -301,4 +336,84 @@ func gitString(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v: %v", args, err)
 	}
 	return string(out)
+}
+
+func TestCommitsNotInRefs(t *testing.T) {
+	repo := refsRepo(t)
+	refsRun(t, repo, "branch", "-M", "main")
+	refsRun(t, repo, "checkout", "-q", "--detach")
+	refsCommitFile(t, repo, "unique.txt", "unique\n", "detached work")
+	sha := strings.TrimSpace(gitString(t, repo, "rev-parse", "HEAD"))
+
+	commits, err := CommitsNotInRefs(context.Background(), repo, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commits) != 1 || commits[0].SHA != sha || commits[0].Subject != "detached work" {
+		t.Fatalf("commits = %#v; want the detached commit", commits)
+	}
+
+	refsRun(t, repo, "update-ref", "refs/heads/copy", sha)
+	commits, err = CommitsNotInRefs(context.Background(), repo, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commits) != 0 {
+		t.Fatalf("commits after a branch ref = %#v; want none", commits)
+	}
+
+	// A tag pins the commit too.
+	refsRun(t, repo, "update-ref", "-d", "refs/heads/copy")
+	refsRun(t, repo, "tag", "pin", sha)
+	commits, err = CommitsNotInRefs(context.Background(), repo, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commits) != 0 {
+		t.Fatalf("commits after a tag ref = %#v; want none", commits)
+	}
+
+	// A remote-tracking ref pins it as well.
+	refsRun(t, repo, "tag", "-d", "pin")
+	refsRun(t, repo, "update-ref", "refs/remotes/origin/pin", sha)
+	commits, err = CommitsNotInRefs(context.Background(), repo, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commits) != 0 {
+		t.Fatalf("commits after a remote-tracking ref = %#v; want none", commits)
+	}
+}
+
+func TestDeleteBranchAt(t *testing.T) {
+	repo := refsRepo(t)
+	refsRun(t, repo, "branch", "-M", "main")
+	refsRun(t, repo, "branch", "feat")
+	sha := strings.TrimSpace(gitString(t, repo, "rev-parse", "feat"))
+
+	wrong := strings.Repeat("1", 40)
+	if err := DeleteBranchAt(context.Background(), repo, "feat", wrong); err == nil {
+		t.Fatal("DeleteBranchAt accepted the wrong expected SHA")
+	}
+	if err := DeleteBranchAt(context.Background(), repo, "feat", strings.Repeat("0", 40)); err == nil {
+		t.Fatal("DeleteBranchAt accepted an all-zero expected SHA")
+	}
+	if _, err := BranchSHA(context.Background(), repo, "feat"); err != nil {
+		t.Fatalf("branch was deleted despite the mismatch: %v", err)
+	}
+	if err := DeleteBranchAt(context.Background(), repo, "feat", sha); err != nil {
+		t.Fatalf("DeleteBranchAt: %v", err)
+	}
+	if _, err := BranchSHA(context.Background(), repo, "feat"); err == nil {
+		t.Fatal("branch was not deleted")
+	}
+
+	// Atomic deletion bypasses git branch's own config cleanup.
+	refsRun(t, repo, "branch", "feat", "main")
+	refsRun(t, repo, "config", "branch.feat.remote", "origin")
+	ForgetBranchConfig(context.Background(), repo, "feat")
+	cmd := exec.Command("git", "-C", repo, "config", "--get", "branch.feat.remote")
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("branch config was not removed: %s", out)
+	}
 }

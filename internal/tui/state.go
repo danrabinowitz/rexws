@@ -90,6 +90,11 @@ type notice struct {
 	text       string
 	detail     string // full context shown only in Help
 	persistent bool
+	// info marks a successful result rather than an error. Info notices lose
+	// the banner to transient errors, warnings, and persistent warnings.
+	info bool
+	// warning marks a non-fatal problem such as a leftover directory.
+	warning bool
 	// priority orders persistent warnings: lower is more urgent.
 	priority int
 	// seq is insertion order; the newest transient error wins the banner.
@@ -143,29 +148,48 @@ func (s State) persistentNotices(now time.Time) []notice {
 }
 
 // bannerNotice chooses the single notice the banner shows and the number of
-// other active notices. Transient errors outrank persistent warnings.
+// other active notices. Transient errors outrank transient warnings, which
+// outrank persistent warnings, which outrank transient info.
 func (s State) bannerNotice(now time.Time) (notice, int, bool) {
 	visible := s.visibleNotices(now)
 	if len(visible) == 0 {
 		return notice{}, 0, false
 	}
 	best := -1
+	bestWarning := -1
+	bestInfo := -1
 	for i, n := range visible {
 		if n.persistent {
 			continue
 		}
-		if best == -1 || n.seq > visible[best].seq {
-			best = i
+		switch {
+		case n.info:
+			if bestInfo == -1 || n.seq > visible[bestInfo].seq {
+				bestInfo = i
+			}
+		case n.warning:
+			if bestWarning == -1 || n.seq > visible[bestWarning].seq {
+				bestWarning = i
+			}
+		default:
+			if best == -1 || n.seq > visible[best].seq {
+				best = i
+			}
 		}
 	}
-	if best == -1 {
-		persistent := s.persistentNotices(now)
-		if len(persistent) == 0 {
-			return notice{}, 0, false
-		}
+	if best != -1 {
+		return visible[best], len(visible) - 1, true
+	}
+	if bestWarning != -1 {
+		return visible[bestWarning], len(visible) - 1, true
+	}
+	if persistent := s.persistentNotices(now); len(persistent) > 0 {
 		return persistent[0], len(visible) - 1, true
 	}
-	return visible[best], len(visible) - 1, true
+	if bestInfo != -1 {
+		return visible[bestInfo], len(visible) - 1, true
+	}
+	return notice{}, 0, false
 }
 
 type statusModal struct {
@@ -556,6 +580,38 @@ func (s State) addError(text string) State {
 	s.noticeSeq++
 	s.notices = append(s.notices, notice{
 		text:    text,
+		seq:     s.noticeSeq,
+		expires: time.Now().Add(8 * time.Second),
+	})
+	return s
+}
+
+// addInfo records a transient successful result. Info notices do not outrank
+// errors, warnings, or persistent warnings in the banner.
+func (s State) addInfo(text string) State {
+	if text == "" {
+		return s
+	}
+	s.noticeSeq++
+	s.notices = append(s.notices, notice{
+		text:    text,
+		info:    true,
+		seq:     s.noticeSeq,
+		expires: time.Now().Add(8 * time.Second),
+	})
+	return s
+}
+
+// addWarning records a transient non-fatal problem, such as a provider that
+// deregistered a worktree but left its directory behind.
+func (s State) addWarning(text string) State {
+	if text == "" {
+		return s
+	}
+	s.noticeSeq++
+	s.notices = append(s.notices, notice{
+		text:    text,
+		warning: true,
 		seq:     s.noticeSeq,
 		expires: time.Now().Add(8 * time.Second),
 	})

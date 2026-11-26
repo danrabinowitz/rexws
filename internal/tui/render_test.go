@@ -11,6 +11,7 @@ import (
 
 	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/core"
+	"github.com/danrabinowitz/rexws/internal/git"
 	"github.com/danrabinowitz/rexws/internal/ops"
 )
 
@@ -291,6 +292,50 @@ func TestRenderRemoveModal(t *testing.T) {
 	}
 }
 
+func TestRenderRemoveModalShowsExactPlan(t *testing.T) {
+	s := renderState(t, 100, 30)
+	plan := ops.RemovePlan{
+		Project:      config.Project{Name: "rexws"},
+		Path:         "/wt/rexws",
+		Branch:       "feat/x",
+		SessionID:    "session:x",
+		ProviderName: "git",
+		Command:      []string{"git", "-C", "/repo", "worktree", "remove", "--force", "/wt/rexws"},
+		Force:        true,
+		Loss: ops.RemoveLoss{
+			DirtyFiles:    []string{" M tracked.txt", "?? untracked.txt", "!! ignored.txt"},
+			Unpushed:      []git.Commit{{SHA: "abc123", Subject: "work"}},
+			Unmerged:      []git.Commit{{SHA: "abc123", Subject: "work"}},
+			BranchState:   ops.CleanupBranchUnmerged,
+			DefaultBranch: "main",
+		},
+	}
+	s.remove = &removeModal{plan: plan, project: "rexws", branch: "feat/x"}
+	s.mode = ModeRemove
+	out := Render(s)
+	assertScreen(t, out, 100, 30)
+	for _, want := range []string{
+		"Loss:",
+		"tracked.txt",
+		"untracked.txt",
+		"ignored.txt",
+		"Retained:",
+		"abc123 work",
+		"is unmerged",
+		"Actions:",
+		"close Rex session session:x",
+		"run provider \"git\" remove",
+		"--force /wt/rexws",
+		"retain branch feat/x",
+		"clear workflow state",
+		"[y/Enter] confirm",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("remove modal missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRenderSanitizesRexStrings(t *testing.T) {
 	s := renderState(t, 80, 24)
 	s.workstreams[0].Windows = []core.Window{{ID: "window:1", Label: "bad\x1b[31m\nlabel", FocusedBlockID: "block:1"}}
@@ -306,5 +351,39 @@ func TestRenderSanitizesRexStrings(t *testing.T) {
 	}
 	if strings.Count(out, "\n") != 23 {
 		t.Errorf("control character added a line:\n%q", out)
+	}
+}
+
+func TestRenderRemoveModalDetached(t *testing.T) {
+	s := renderState(t, 100, 30)
+	plan := ops.RemovePlan{
+		Project:      config.Project{Name: "rexws"},
+		Path:         "/wt/detached",
+		SessionID:    "session:x",
+		ProviderName: "git",
+		Command:      []string{"git", "worktree", "remove", "/wt/detached"},
+		Force:        true,
+		Loss: ops.RemoveLoss{
+			Detached:        true,
+			DetachedCommits: []git.Commit{{SHA: "abc123", Subject: "detached work"}},
+		},
+	}
+	s.remove = &removeModal{plan: plan, project: "rexws", branch: "0123456"}
+	s.mode = ModeRemove
+	out := Render(s)
+	assertScreen(t, out, 100, 30)
+	for _, want := range []string{
+		"Loss:",
+		"commits unique to the detached HEAD",
+		"abc123 detached work",
+		"Actions:",
+		"close Rex session session:x",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("detached remove modal missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "retain branch") {
+		t.Errorf("detached remove modal claimed a retained branch:\n%s", out)
 	}
 }

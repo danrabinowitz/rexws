@@ -281,7 +281,7 @@ func TestRmEchoPrecedesProvider(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "worktrees")
 	t.Setenv(config.EnvDir, filepath.Join(t.TempDir(), "config"))
 	cfg := config.Default()
-	cfg.Providers["marker"] = config.Provider{Remove: []string{"sh", "-c", "echo provider-ran"}}
+	cfg.Providers["marker"] = config.Provider{Remove: []string{"sh", "-c", "echo provider-ran; git -C '{{.RepoPath}}' worktree remove '{{.WorktreePath}}'"}}
 	if _, _, err := cfg.RegisterProject(mustCanonical(t, repo), "repo", "marker", root); err != nil {
 		t.Fatal(err)
 	}

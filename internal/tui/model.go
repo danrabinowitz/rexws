@@ -541,7 +541,10 @@ type removePreparedMsg struct {
 
 func preflightRemoveCmd(ctx context.Context, cfg config.Config, request RemoveRequest) tea.Cmd {
 	return func() tea.Msg {
-		plan, err := ops.PrepareRemove(ctx, cfg, request.Path)
+		// The confirmation screen is the TUI's consent for a forced removal:
+		// it lists every path and commit the plan would discard. The branch is
+		// always retained from the TUI.
+		plan, err := ops.PrepareRemoveWithOptions(ctx, cfg, request.Path, ops.RemoveOptions{Force: true})
 		return removePreparedMsg{plan: plan, err: err}
 	}
 }
@@ -571,6 +574,11 @@ type removeSessionClosedMsg struct {
 
 func closeSessionCmd(ctx context.Context, cfg config.Config, plan ops.RemovePlan) tea.Cmd {
 	return func() tea.Msg {
+		// Re-check the worktree and session immediately before the first
+		// mutation, exactly as ExecuteRemove does for the CLI.
+		if err := plan.VerifyRemoval(ctx, cfg); err != nil {
+			return removeSessionClosedMsg{plan: plan, err: err}
+		}
 		closed, err := plan.CloseSession(ctx, cfg)
 		return removeSessionClosedMsg{plan: plan, closedID: closed, err: err}
 	}
@@ -581,6 +589,12 @@ func (m *Model) handleRemoveSessionClosed(msg removeSessionClosedMsg) (*Model, t
 		m.state.pending = false
 		m.state.pendingLabel = ""
 		m.state = m.state.addError(msg.err.Error())
+		return m, m.refreshNow()
+	}
+	if err := msg.plan.VerifyRemoval(m.ctx, m.state.cfg); err != nil {
+		m.state.pending = false
+		m.state.pendingLabel = ""
+		m.state = m.state.addError(err.Error())
 		return m, m.refreshNow()
 	}
 	cmd, err := msg.plan.Cmd()
@@ -611,11 +625,41 @@ func (m *Model) handleRemoveExecDone(msg removeExecDoneMsg) (*Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	if msg.err != nil {
 		m.state = m.state.addError("provider remove: " + msg.err.Error())
-	} else if err := msg.plan.Cleanup(m.state.cfg); err != nil {
-		m.state = m.state.addError(err.Error())
+	} else if leftover, verifyErr := msg.plan.VerifyRemoved(m.ctx); verifyErr != nil {
+		m.state = m.state.addError(verifyErr.Error())
+	} else {
+		if err := msg.plan.Cleanup(m.state.cfg); err != nil {
+			m.state = m.state.addError(err.Error())
+		}
+		if leftover != "" {
+			m.state = m.state.addWarning(leftover)
+		}
+		if warning := msg.plan.MissingBranchWarning(m.ctx); warning != "" {
+			m.state = m.state.addWarning(warning)
+		}
+		if retained := msg.plan.RetainedBranch(m.ctx); retained != nil {
+			m.state = m.state.addInfo(retainedBranchNotice(retained))
+		}
 	}
 	cmds = append(cmds, m.refreshNow())
 	return m, batch(cmds)
+}
+
+// retainedBranchNotice is the TUI form of the CLI's retained-branch report.
+func retainedBranchNotice(branch *ops.RetainedBranch) string {
+	if branch.Error != "" {
+		return "Retained branch " + branch.Branch + ": state unknown (" + branch.Error + ")"
+	}
+	switch branch.State {
+	case ops.CleanupBranchMerged:
+		return "Retained branch " + branch.Branch + ": merged into " + branch.DefaultBranch + "; no unmerged commits."
+	case ops.CleanupBranchPatchEquivalent:
+		return "Retained branch " + branch.Branch + ": patch-equivalent to " + branch.DefaultBranch + "."
+	case ops.CleanupBranchUnmerged:
+		return fmt.Sprintf("Retained branch %s: unmerged, %d commit(s) not in %s.", branch.Branch, len(branch.Commits), branch.DefaultBranch)
+	default:
+		return "Retained branch " + branch.Branch + "."
+	}
 }
 
 // createPreparedMsg carries the validated, rendered create plan.

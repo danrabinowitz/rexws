@@ -126,14 +126,89 @@ rexws list
 the worktree path that `list` prints still works. When you're done, `rm`
 resolves the selector, prints the resolved session label and path, then closes
 the session, runs the provider's remove command, and clears the workstream's
-metadata — but leaves the branch alone:
+metadata. The branch is retained by default:
 
 ```sh
 rexws rm <selector>
 ```
 
-`rm` refuses the main worktree and refuses dirty worktrees. It has no `--force`,
-and it currently requires Rex to be reachable.
+`rm` refuses the main worktree, a dirty worktree, and a detached HEAD. It
+requires Rex to be reachable so its session pre-check and close are real. A
+plain `rm` does not need a resolvable default branch; only `--force` (best
+effort) and `--delete-branch` (required) compare the branch against it. If the
+branch state cannot be proved under `--force`, `rm` says so and treats it as a
+loss to confirm; `--delete-branch` refuses.
+
+Remove a dirty or detached worktree anyway:
+
+```sh
+rexws rm <selector> --force
+```
+
+Before acting, `--force` prints `LOSS`, `RETAINED`, and `ACTIONS` to stderr.
+`LOSS` is only what is truly discarded: every uncommitted, staged, untracked,
+and ignored path (the whole directory is deleted) and every commit unique to a
+detached HEAD that no branch, tag, or remote contains. `RETAINED` describes the
+branch that stays — merged, patch-equivalent, or unmerged — and its commits
+that are on no remote-tracking ref. Retained commits are not lost and do not
+prompt. `--force` asks for confirmation only when `LOSS` is non-empty or the
+branch state could not be assessed. Scripts and `--json` runs must pass
+`--yes`; `--json` always requires `--yes` with `--force`, so stdout stays a
+single document and no prompt can hang a pipeline. The built-in `git`
+provider's `worktree remove` gets `--force` only for a dirty worktree; a custom
+provider must handle a dirty removal itself.
+
+Delete the branch as part of the removal:
+
+```sh
+rexws rm <selector> --delete-branch
+```
+
+The worktree is removed first. The branch is deleted only when a fresh proof
+shows it is merged (an ancestor of the project's default branch) or
+patch-equivalent (merging it back is a clean no-op). Merged branches try
+`git branch -d`; if `-d` refuses because the main checkout's HEAD is elsewhere,
+`rm` re-proves the base-relative ancestry and deletes atomically with
+`git update-ref -d refs/heads/<branch> <sha>`, so a branch that moved cannot be
+deleted. Patch-equivalent branches use the same atomic deletion only after a
+fresh merge-tree proof immediately before deletion. Protected branches and an
+unmerged branch are never deleted, with or without `--force`;
+`--delete-branch` refuses and explains before removing anything. Remote
+branches are never touched. `--yes` is accepted with `--delete-branch` even
+though branch deletion alone never prompts.
+
+After removal, `rm` reports the branch it retained and whether it still holds
+unmerged commits:
+
+```text
+Retained branch feat/auth: unmerged, 2 commit(s) not in main.
+```
+
+The `--json` result carries `deleted_branch`, `retained_branches` (`branch`,
+`state`, `default_branch`, `commits`, `error`), `warnings`, `retained` when a
+branch is kept (plan-time `branch`, `state`, `default_branch`,
+`unpushed_commits`, `unmerged_commits`), and, for `--force`, `loss`. `loss` is
+only what is discarded: `dirty_files`, `detached`, `detached_commits`, and
+`assessment_error`. The CLI's `LOSS` and `RETAINED` sections use the same
+split. A partial failure after the worktree was removed still emits the JSON
+document with `error` set and `retained_branches` populated, then exits
+nonzero.
+
+Provider contract: a remove command must deregister the worktree and must not
+delete the branch. `--delete-branch` is the only branch-deletion path. If a
+provider deregisters the worktree but leaves its directory behind, state is
+cleared and the leftover directory is reported as a warning; if the worktree is
+still registered, removal fails and state is kept. If a provider deletes the
+branch anyway, `rm` warns that the branch disappeared and names the commits
+that may now be unreachable.
+
+Before each mutation, `rm` re-verifies the plan, and it checks the worktree
+before killing the Rex session: the worktree must still be clean (or still have
+exactly the paths the loss report named), its branch and HEAD must not have
+moved, a detached HEAD's unique-commit set is recomputed (so a ref moved during
+confirmation cannot strand a commit silently), no new live Rex session may have
+appeared, and the branch proof is re-run immediately before deletion. A stale
+proof refuses and keeps the worktree or branch.
 
 ### Commands
 
@@ -146,7 +221,7 @@ and it currently requires Rex to be reachable.
 | `rexws new <project> <branch> [--json] [--switch] [--client ...]` | Create a worktree with the project's provider; with `--switch`, also create or select its Rex session. |
 | `rexws switch <selector> [--window ...] [--client ...] [--json]` | Show the workstream's Rex session, creating it if needed; optionally select a window. |
 | `rexws status <selector> <stage> [--json]` | Set a workstream's workflow status, by ID or label. |
-| `rexws rm <selector> [--json]` | Close the session, remove the worktree, clear its metadata. |
+| `rexws rm <selector> [--json] [--force] [--yes] [--delete-branch]` | Close the session, remove the worktree, clear its metadata; with `--delete-branch`, delete the branch only when merged or patch-equivalent. |
 | `rexws cleanup [--project <name>] [--json] [--apply] [--force] [--fix [--yes]]` | Report every worktree, branch, and orphan with a reason; remove only the provably safe set and prune only provably stale `state.json` entries. |
 
 ### Selecting a workstream
@@ -462,7 +537,11 @@ collapses or returns to the parent. `/` filters by case-insensitive substring
 across project, branch, workflow status, agent state, and windows while keeping
 parent context.
 Live Rex streams update agent badges and window state as they change. Press `?`
-for the full key map and `s` to change a workstream's status.
+for the full key map and `s` to change a workstream's status. `d` opens the
+remove confirmation, which lists the same `LOSS`, `RETAINED`, and `ACTIONS` the
+CLI would print. After the provider removes the worktree, the dashboard
+notifies you of the retained branch and whether it is unmerged, and warns if a
+provider deregistered the worktree but left its directory.
 
 See `TUI-UX.md` for the full UX design.
 
@@ -607,8 +686,10 @@ Stated now so they stop being relitigated:
 - **No PR/CI enrichment in core.** Those are satellite ideas, not features of
   this binary.
 - **No automatic or scheduled branch deletion.** `rm` removes the worktree and
-  leaves the branch; `cleanup --apply` deletes only branches proven merged or
-  patch-equivalent, or explicitly forced after naming the loss.
+  leaves the branch unless `--delete-branch` is explicit, and that flag deletes
+  only a branch proven merged or patch-equivalent to the default branch;
+  `cleanup --apply` deletes only branches proven merged or patch-equivalent, or
+  explicitly forced after naming the loss.
 - **No Kanban view, mouse support, or configurable keybindings.**
 - **No window create/rename/close from `rexws`.**
 - **No session adoption yet.** Matching is exact on `<project>/<branch>`, so

@@ -154,6 +154,25 @@ func CommitsOutside(ctx context.Context, repoPath, base, branch string) ([]Commi
 	if err != nil {
 		return nil, err
 	}
+	return parseCommits(out), nil
+}
+
+// UnpushedCommits returns the commits the branch adds beyond base that are not
+// reachable from any remote-tracking ref. "Unpushed" therefore means commits
+// new on this local branch that no remote has, not the whole shared history. A
+// branch merged into base has none.
+func UnpushedCommits(ctx context.Context, repoPath, base, branch string) ([]Commit, error) {
+	// --not applies to everything after it: branch minus base minus every
+	// refs/remotes/* ref. Without a remote, every commit the branch adds is
+	// unpushed.
+	out, err := runGit(ctx, repoPath, "log", "--format=%H%x09%s", branch, "--not", base, "--remotes")
+	if err != nil {
+		return nil, err
+	}
+	return parseCommits(out), nil
+}
+
+func parseCommits(out []byte) []Commit {
 	var commits []Commit
 	for _, line := range splitLines(out) {
 		sha, subject, _ := strings.Cut(line, "\t")
@@ -162,12 +181,26 @@ func CommitsOutside(ctx context.Context, repoPath, base, branch string) ([]Commi
 		}
 		commits = append(commits, Commit{SHA: sha, Subject: subject})
 	}
-	return commits, nil
+	return commits
+}
+
+// CommitsNotInRefs returns commits reachable from rev but from no local branch,
+// remote-tracking ref, or tag. It is the detached-HEAD loss check: these
+// commits have no ref other than HEAD, so removing the worktree strands them.
+func CommitsNotInRefs(ctx context.Context, repoPath, rev string) ([]Commit, error) {
+	// --not applies to the ref groups after it. Do not use --all: it includes
+	// HEAD, which would make the result empty even for unique commits.
+	out, err := runGit(ctx, repoPath, "log", "--format=%H%x09%s", rev, "--not", "--branches", "--tags", "--remotes")
+	if err != nil {
+		return nil, err
+	}
+	return parseCommits(out), nil
 }
 
 // StatusLines returns the worktree's porcelain status lines: one entry per
-// modified or untracked path. Ignored files are not included, so this is the
-// same notion of dirty that rm and git-worktree-prune-safe use.
+// modified or untracked path. Ignored files are not included. Callers that
+// delete a directory, such as rm and cleanup, use
+// StatusLinesIncludingIgnored instead.
 func StatusLines(ctx context.Context, worktreePath string) ([]string, error) {
 	return statusLines(ctx, worktreePath)
 }
@@ -218,6 +251,25 @@ func DeleteBranch(ctx context.Context, repoPath, branch string, force bool) erro
 	}
 	_, err := runGit(ctx, repoPath, "branch", flag, "--", branch)
 	return err
+}
+
+// DeleteBranchAt atomically deletes branch only if it still points at
+// expectedSHA. It closes the window between a fresh proof and the deletion.
+func DeleteBranchAt(ctx context.Context, repoPath, branch, expectedSHA string) error {
+	if expectedSHA == "" || strings.Trim(expectedSHA, "0") == "" {
+		// git treats an all-zero old value as "the ref must not exist", which
+		// would delete unconditionally. Require a real commit id.
+		return errors.New("DeleteBranchAt requires a non-zero expected commit")
+	}
+	_, err := runGit(ctx, repoPath, "update-ref", "-d", "refs/heads/"+branch, expectedSHA)
+	return err
+}
+
+// ForgetBranchConfig best-effort removes branch.<name> config after an atomic
+// ref deletion, so a recreated branch does not inherit stale upstream settings.
+// The ref is already gone; a missing section is not an error.
+func ForgetBranchConfig(ctx context.Context, repoPath, branch string) {
+	_, _ = runGit(ctx, repoPath, "config", "--remove-section", "branch."+branch)
 }
 
 func splitLines(out []byte) []string {
