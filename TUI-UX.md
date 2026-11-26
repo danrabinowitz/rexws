@@ -5,6 +5,8 @@ The implementation lives in `internal/tui`.
 
 Related: `SPEC.md` (product design), `ROADMAP.md` (milestones).
 
+Visual design: [`TUI-DESIGN.md`](TUI-DESIGN.md) defines the palette, wide-terminal layout, column grid, state copy, and accessibility rules. This file remains authoritative for behavior, keybindings, search, and acceptance criteria; `TUI-DESIGN.md` notes where it supersedes a layout or color decision.
+
 ## 1. Goal and scope
 
 The TUI is a grouped, hierarchical workspace dashboard.
