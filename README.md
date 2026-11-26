@@ -11,8 +11,8 @@ your own workflow metadata, and stays out of the way.
 > endorsed by, or supported by Rex or Superlogical.
 
 **Status:** pre-1.0, active development. The CLI and the interactive TUI both
-work; there is no tagged release and no CI yet. See
-[Project status](#project-status).
+work; CI runs on every push to `main` and on pull requests, and there is no
+tagged release yet. See [Project status](#project-status).
 
 ---
 
@@ -356,7 +356,8 @@ may change without migration support.
 
 **Not yet:**
 
-- No tagged release and no CI. Windows and Linux are untested.
+- No tagged release yet. CI runs formatting, vet, and tests, including the race
+  detector, on Linux; Windows is untested.
 - Verified against Rex `0.1.0-preview.25` (API revision 24). There is no Rex
   version check, so a preview drift can break the adapter.
 - The JSON contract is not frozen and has no `schema_version`.
