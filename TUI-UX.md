@@ -330,7 +330,12 @@ Rules:
 - A second `Right` is what enters the first child; the first `Right` only
   expands. This round-trips with `Left`.
 - Group headers are skipped. Collapsed children are hidden.
-- Navigation does not wrap at the edges.
+- `j`/`k` and `↓`/`↑` wrap: forward from the last selectable row selects the
+  first, and backward from the first selects the last. Wrapping crosses group
+  headers without selecting them, so from the last row of the final group a
+  forward move lands on the first row of the first group. With an existing
+  selection and only one selectable row, the key is a no-op. `PgUp`/`PgDn` do
+  not wrap; they stop at the edges.
 - Right on a parent with no children is a no-op. Space on a child is a no-op.
 - There is no `g`/`G`, `Home`, or `End` binding in v1.
 
@@ -341,7 +346,13 @@ Selection algorithm:
 - After a refresh or filter change, select the same key if it is still visible.
 - Otherwise clamp the previous row index to the new row count, then scan forward
   for the next selectable row; if none, scan backward. If no selectable row
-  exists, there is no selection.
+  exists, there is no selection. This fallback does not wrap.
+- `j`/`k` and `↓`/`↑` move one selectable row and wrap around the list. The
+  scan is a ring over selectable rows only: group headers are never selected,
+  and the starting row is never a wrap target, so an existing selection with
+  fewer than two selectable rows does not move. With no selection, a forward
+  move selects the first selectable row and a backward move selects the last.
+  `PgUp`/`PgDn` move by a page and stop at the edges without wrapping.
 - With no selection, `Enter`, `s`, `d`, `Right`, and `Space` are no-ops.
   `/`, `n`, `r`, `PgUp`/`PgDn`, `q`, and `?` still work.
 
@@ -599,7 +610,8 @@ full reason, the exact loss for dirty/unmerged items, and any result or error.
 The orphan section is part of the same report but is not fixed here; use
 `rexws cleanup --fix` for stale `state.json` entries.
 
-Keys: `j`/`k` and arrows move (group headers are skipped), `Space` toggles,
+Keys: `j`/`k` and arrows move (group headers are skipped; does not wrap;
+stops at the edges), `Space` toggles,
 `a` toggles all safe, `f` toggles force, `v` opens detail, `Enter` opens review
 when something is selected (otherwise detail), `PgUp`/`PgDn` page, `r` rescans
 and discards the previous result, `Esc` returns to the dashboard.

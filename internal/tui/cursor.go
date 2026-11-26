@@ -34,10 +34,21 @@ func ClampCursor(rows []Row, key RowKey, previous int) (RowKey, int) {
 	return RowKey{}, -1
 }
 
-// MoveCursor moves the selection by delta selectable rows, without wrapping.
-// delta may be negative. When there is no selection, it selects the first
-// selectable row for a forward move and the last for a backward move.
+// MoveCursor moves the selection by delta selectable rows. A single-step move
+// wraps: forward from the last selectable row selects the first, and backward
+// from the first selects the last, crossing group headers without selecting
+// them. Larger moves stop at the edges. delta may be negative. When there is
+// no selection, it selects the first selectable row for a forward move and the
+// last for a backward move.
 func MoveCursor(rows []Row, current, delta int) (RowKey, int) {
+	return moveCursor(rows, current, delta, delta == 1 || delta == -1)
+}
+
+// moveCursor implements MoveCursor. When wrap is set, a step that runs past the
+// first or last selectable row continues from the opposite end. The starting
+// row is never a wrap target, so an existing selection with fewer than two
+// selectable rows does not move.
+func moveCursor(rows []Row, current, delta int, wrap bool) (RowKey, int) {
 	if delta == 0 || len(rows) == 0 {
 		return ClampCursor(rows, RowKey{}, current)
 	}
@@ -75,6 +86,9 @@ func MoveCursor(rows []Row, current, delta int) (RowKey, int) {
 					break
 				}
 			}
+			if next < 0 && wrap {
+				next = wrapIndex(rows, index, step)
+			}
 		}
 		if next < 0 {
 			break
@@ -85,6 +99,26 @@ func MoveCursor(rows []Row, current, delta int) (RowKey, int) {
 		return RowKey{}, -1
 	}
 	return rows[index].Key, index
+}
+
+// wrapIndex returns the first selectable row for a forward step and the last
+// for a backward step, scanning the side opposite index. It returns -1 when
+// index is the only selectable row.
+func wrapIndex(rows []Row, index, step int) int {
+	if step > 0 {
+		for i := 0; i < index; i++ {
+			if rows[i].Selectable() {
+				return i
+			}
+		}
+		return -1
+	}
+	for i := len(rows) - 1; i > index; i-- {
+		if rows[i].Selectable() {
+			return i
+		}
+	}
+	return -1
 }
 
 // FirstChild returns the first visible child row after parentIndex.

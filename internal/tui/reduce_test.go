@@ -45,7 +45,7 @@ func typeString(s State, text string) State {
 	return s
 }
 
-func TestNormalNavigationSkipsGroups(t *testing.T) {
+func TestNormalNavigationSkipsGroupsAndWraps(t *testing.T) {
 	s := testState(t)
 	if s.cursorKey.ID != "/wt/rexws" {
 		t.Fatalf("initial cursor = %#v", s.cursorKey)
@@ -63,8 +63,92 @@ func TestNormalNavigationSkipsGroups(t *testing.T) {
 		t.Errorf("down = %#v", s.cursorKey)
 	}
 	s, _ = Reduce(s, runeKey('j'))
+	if s.cursorKey.ID != "/wt/rexws" {
+		t.Errorf("down did not wrap to the first row: %#v", s.cursorKey)
+	}
+	s, _ = Reduce(s, runeKey('k'))
 	if s.cursorKey.ID != "/wt/ai" {
-		t.Errorf("navigation wrapped at the end: %#v", s.cursorKey)
+		t.Errorf("up did not wrap to the last row: %#v", s.cursorKey)
+	}
+}
+
+func TestArrowKeysWrapAtEdges(t *testing.T) {
+	s := testState(t)
+	for s.cursorKey.ID != "/wt/ai" {
+		s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyDown})
+	if s.cursorKey.ID != "/wt/rexws" {
+		t.Errorf("down arrow did not wrap: %#v", s.cursorKey)
+	}
+	s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyUp})
+	if s.cursorKey.ID != "/wt/ai" {
+		t.Errorf("up arrow did not wrap: %#v", s.cursorKey)
+	}
+}
+
+func TestPageKeysStopAtEdges(t *testing.T) {
+	s := testState(t)
+	for s.cursorKey.ID != "/wt/ai" {
+		s, _ = Reduce(s, runeKey('j'))
+	}
+	s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyPgDown})
+	if s.cursorKey.ID != "/wt/ai" {
+		t.Errorf("PgDn wrapped past the end: %#v", s.cursorKey)
+	}
+	for s.cursorKey.ID != "/wt/rexws" {
+		s, _ = Reduce(s, runeKey('k'))
+	}
+	s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyPgUp})
+	if s.cursorKey.ID != "/wt/rexws" {
+		t.Errorf("PgUp wrapped past the start: %#v", s.cursorKey)
+	}
+}
+
+func TestPageKeysStopAtEdgesWithOneRowPage(t *testing.T) {
+	// A height of 4 leaves one row of body, so a page jump is also a single
+	// step. It must clamp instead of taking the wrapping j/k path.
+	s := testState(t)
+	s.height = 4
+	for s.cursorKey.ID != "/wt/ai" {
+		s, _ = Reduce(s, runeKey('j'))
+	}
+	s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyPgDown})
+	if s.cursorKey.ID != "/wt/ai" {
+		t.Errorf("single-row PgDn wrapped past the end: %#v", s.cursorKey)
+	}
+	for s.cursorKey.ID != "/wt/rexws" {
+		s, _ = Reduce(s, runeKey('k'))
+	}
+	s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyPgUp})
+	if s.cursorKey.ID != "/wt/rexws" {
+		t.Errorf("single-row PgUp wrapped past the start: %#v", s.cursorKey)
+	}
+}
+
+func TestSearchNavigationStopsAtEdges(t *testing.T) {
+	s := testState(t)
+	s, _ = Reduce(s, runeKey('/'))
+	if s.mode != ModeSearch || s.query != "" {
+		t.Fatalf("search mode = %v, query = %q", s.mode, s.query)
+	}
+	for s.cursorKey.ID != "/wt/ai" {
+		s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyDown}, {Type: tea.KeyCtrlN}} {
+		s, _ = Reduce(s, key)
+		if s.cursorKey.ID != "/wt/ai" {
+			t.Errorf("%v moved past the last row: %#v", key, s.cursorKey)
+		}
+	}
+	for s.cursorKey.ID != "/wt/rexws" {
+		s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyUp})
+	}
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyUp}, {Type: tea.KeyCtrlP}} {
+		s, _ = Reduce(s, key)
+		if s.cursorKey.ID != "/wt/rexws" {
+			t.Errorf("%v moved past the first row: %#v", key, s.cursorKey)
+		}
 	}
 }
 

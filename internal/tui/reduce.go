@@ -135,9 +135,9 @@ func reduceNormal(s State, msg tea.KeyMsg) (State, Effects) {
 		}
 		return s, Effects{Refresh: true, Reconnect: true}
 	case msg.Type == tea.KeyPgDown:
-		return moveSelection(s, pageSize(s)), Effects{}
+		return moveSelectionClamped(s, pageSize(s)), Effects{}
 	case msg.Type == tea.KeyPgUp:
-		return moveSelection(s, -pageSize(s)), Effects{}
+		return moveSelectionClamped(s, -pageSize(s)), Effects{}
 	}
 	return s, Effects{}
 }
@@ -149,9 +149,9 @@ func reduceSearch(s State, msg tea.KeyMsg) (State, Effects) {
 	case msg.Type == tea.KeyEnter:
 		return s.acceptSearch(), Effects{}
 	case msg.Type == tea.KeyDown, msg.Type == tea.KeyCtrlN:
-		return moveSelection(s, 1), Effects{}
+		return moveSelectionClamped(s, 1), Effects{}
 	case msg.Type == tea.KeyUp, msg.Type == tea.KeyCtrlP:
-		return moveSelection(s, -1), Effects{}
+		return moveSelectionClamped(s, -1), Effects{}
 	case isSpace(msg):
 		s.input = insertSearchRune(s.input, ' ')
 		return s.setQuery(s.input.Value()), Effects{}
@@ -314,7 +314,14 @@ func reduceNewForm(s State, msg tea.KeyMsg) (State, Effects) {
 }
 
 func moveSelection(s State, delta int) State {
-	s.cursorKey, s.cursorRow = MoveCursor(s.rows, s.cursorRow, delta)
+	s.cursorKey, s.cursorRow = moveCursor(s.rows, s.cursorRow, delta, true)
+	return s.ensureCursorVisible()
+}
+
+// moveSelectionClamped moves the selection without wrapping. Page jumps and
+// search-mode movement stop at the edges.
+func moveSelectionClamped(s State, delta int) State {
+	s.cursorKey, s.cursorRow = moveCursor(s.rows, s.cursorRow, delta, false)
 	return s.ensureCursorVisible()
 }
 
