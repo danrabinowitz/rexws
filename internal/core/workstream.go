@@ -6,24 +6,43 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/danrabinowitz/rexws/internal/agentstate"
 	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/git"
 	"github.com/danrabinowitz/rexws/internal/pathutil"
 )
 
 // AgentState is what the coding agent in a workstream's Rex session is doing.
-type AgentState string
+type AgentState = agentstate.State
 
 const (
-	AgentBlocked AgentState = "blocked"
-	AgentError   AgentState = "error"
-	AgentWorking AgentState = "working"
-	AgentDone    AgentState = "done"
-	AgentIdle    AgentState = "idle"
-	AgentStopped AgentState = "stopped"
+	AgentBlocked = agentstate.Blocked
+	AgentError   = agentstate.Error
+	AgentWorking = agentstate.Working
+	AgentDone    = agentstate.Done
+	AgentIdle    = agentstate.Idle
+	AgentStopped = agentstate.Stopped
 	// AgentUnknown means a Rex session exists but its status could not be read.
-	AgentUnknown AgentState = "unknown"
+	AgentUnknown = agentstate.Unknown
 )
+
+// Agent is one terminal block that reported program status. A plain shell pane
+// with no reports is not an agent, so a session may have fewer agents than
+// blocks.
+type Agent struct {
+	BlockID      string     `json:"block_id"`
+	BlockLabel   string     `json:"block_label,omitempty"`
+	WindowID     string     `json:"window_id"`
+	WindowLabel  string     `json:"window_label,omitempty"`
+	App          string     `json:"app,omitempty"`
+	EffectiveApp string     `json:"effective_app,omitempty"`
+	State        AgentState `json:"state"`
+	Detail       string     `json:"detail,omitempty"`
+	Msg          string     `json:"msg,omitempty"`
+	Title        string     `json:"title,omitempty"`
+	UpdatedAt    string     `json:"updated_at,omitempty"`
+	Error        string     `json:"error,omitempty"`
+}
 
 // Workstream is one worktree enriched with workflow and Rex state.
 type Workstream struct {
@@ -36,6 +55,7 @@ type Workstream struct {
 	RexSessionID   string        `json:"rex_session_id"`
 	AgentState     AgentState    `json:"agent_state"`
 	AgentDetail    string        `json:"agent_detail,omitempty"`
+	Agents         []Agent       `json:"agents"`
 	Detached       bool          `json:"detached,omitempty"`
 }
 
@@ -45,12 +65,15 @@ type Input struct {
 	Worktrees []git.Worktree
 }
 
-// Session is a Rex session enriched with its agent state.
+// Session is a Rex session enriched with its agents.
 type Session struct {
-	ID          string
-	Label       string
-	AgentState  AgentState
-	AgentDetail string
+	ID    string
+	Label string
+	// Agents are the session's reporting terminal blocks.
+	Agents []Agent
+	// Unreadable means the session's blocks could not be listed; Agents is
+	// then empty and the session's aggregate is unknown.
+	Unreadable bool
 }
 
 // Build joins worktree discovery with state.json and Rex sessions.
@@ -87,12 +110,18 @@ func Build(inputs []Input, state config.State, sessions []Session) ([]Workstream
 				WorkflowStatus: stored.Status,
 				Note:           stored.Note,
 				AgentState:     AgentStopped,
+				Agents:         []Agent{},
 				Detached:       wt.Detached,
 			}
 			if session, ok := byLabel[ws.SessionName]; ok {
 				ws.RexSessionID = session.ID
-				ws.AgentState = session.AgentState
-				ws.AgentDetail = session.AgentDetail
+				switch {
+				case session.Unreadable:
+					ws.AgentState = AgentUnknown
+				default:
+					ws.Agents = append([]Agent{}, session.Agents...)
+					ws.AgentState, ws.AgentDetail = summarize(ws.Agents)
+				}
 			}
 			workstreams = append(workstreams, ws)
 		}
@@ -109,6 +138,45 @@ func Build(inputs []Input, state config.State, sessions []Session) ([]Workstream
 		return a.Branch < b.Branch
 	})
 	return workstreams, nil
+}
+
+// summarize reduces per-block agents to the most urgent state. Unknown agents
+// do not outrank a known state; if every agent is unknown, the result is
+// unknown. No agents means the session is idle.
+func summarize(agents []Agent) (AgentState, string) {
+	if len(agents) == 0 {
+		return AgentIdle, ""
+	}
+
+	best := AgentUnknown
+	bestSeverity := -1
+	detail := ""
+	known := false
+	for _, agent := range agents {
+		state := agent.State
+		if state == "" {
+			state = AgentUnknown
+		}
+		if state == AgentUnknown {
+			continue
+		}
+		known = true
+		severity := state.Severity()
+		if severity > bestSeverity {
+			best = state
+			bestSeverity = severity
+			detail = ""
+			if state == AgentBlocked {
+				detail = agent.Detail
+			}
+		} else if severity == bestSeverity && best == AgentBlocked && detail == "" {
+			detail = agent.Detail
+		}
+	}
+	if !known {
+		return AgentUnknown, ""
+	}
+	return best, detail
 }
 
 // FilterStatuses keeps only workstreams at one of the given stages. An empty

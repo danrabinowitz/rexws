@@ -7,12 +7,15 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/danrabinowitz/rexws/internal/agentstate"
 )
 
-// TestLiveSessionAgent reads a real session's program status. Run it with:
+// TestLiveSessionAgents reads a real session's per-block program status. Run
+// it with:
 //
 //	REXWS_LIVE_SESSION=<session-id> go test -tags live ./internal/rex -run TestLive -v
-func TestLiveSessionAgent(t *testing.T) {
+func TestLiveSessionAgents(t *testing.T) {
 	sessionID := os.Getenv("REXWS_LIVE_SESSION")
 	if sessionID == "" {
 		t.Skip("set REXWS_LIVE_SESSION to a live Rex session ID")
@@ -20,14 +23,18 @@ func TestLiveSessionAgent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	state, detail, err := New().SessionAgent(ctx, sessionID)
+	blocks, err := New().SessionAgents(ctx, sessionID)
 	if err != nil {
-		t.Fatalf("SessionAgent: %v", err)
+		t.Fatalf("SessionAgents: %v", err)
 	}
-	switch state {
-	case "idle", "working", "blocked", "error", "done":
-	default:
-		t.Fatalf("unexpected state %q", state)
+	for _, block := range blocks {
+		switch block.State {
+		case agentstate.Idle, agentstate.Working, agentstate.Blocked, agentstate.Error,
+			agentstate.Done, agentstate.Unknown:
+		default:
+			t.Errorf("block %s has unexpected state %q", block.BlockID, block.State)
+		}
+		t.Logf("%s/%s app=%s state=%s detail=%q", block.WindowLabel, block.BlockLabel, block.App, block.State, block.Detail)
 	}
-	t.Logf("state=%s detail=%q", state, detail)
+	t.Logf("%d reporting terminal blocks", len(blocks))
 }

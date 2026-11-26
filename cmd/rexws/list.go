@@ -8,6 +8,7 @@ import (
 
 	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/core"
+	"github.com/danrabinowitz/rexws/internal/render"
 	"github.com/danrabinowitz/rexws/internal/rex"
 )
 
@@ -66,7 +67,7 @@ func newListCmd() *cobra.Command {
 			fmt.Fprintln(writer, "PROJECT\tBRANCH\tSTATUS\tAGENT\tSESSION\tPATH")
 			for _, ws := range workstreams {
 				fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n",
-					ws.Project, ws.Branch, ws.WorkflowStatus, agentLabel(ws), shortSession(ws.RexSessionID), ws.Path)
+					ws.Project, ws.Branch, ws.WorkflowStatus, render.Default.Format(ws), shortSession(ws.RexSessionID), ws.Path)
 			}
 			return writer.Flush()
 		},
@@ -79,7 +80,6 @@ func newListCmd() *cobra.Command {
 // rexSessions reads Rex state. A missing or stopped Rex server degrades to
 // warnings rather than hiding the Git workstreams.
 func rexSessions(cmd *cobra.Command) ([]core.Session, []string) {
-	var warnings []string
 	if _, err := exec.LookPath("rex"); err != nil {
 		return nil, []string{fmt.Sprintf("Rex unavailable: %v", err)}
 	}
@@ -88,23 +88,61 @@ func rexSessions(cmd *cobra.Command) ([]core.Session, []string) {
 	if err != nil {
 		return nil, []string{fmt.Sprintf("Rex unavailable: %v", err)}
 	}
+	return coreSessions(snapshot)
+}
 
+// coreSessions converts Rex's per-block view into the core model. A session
+// whose blocks could not be listed is unreadable; a block whose status could
+// not be read becomes an unknown agent with its error preserved.
+func coreSessions(snapshot []rex.SessionStatus) ([]core.Session, []string) {
+	var warnings []string
 	sessions := make([]core.Session, 0, len(snapshot))
 	for _, item := range snapshot {
-		session := core.Session{
-			ID:    item.ID,
-			Label: item.Label,
-		}
+		session := core.Session{ID: item.ID, Label: item.Label}
 		if item.Err != nil {
+			session.Unreadable = true
 			warnings = append(warnings, fmt.Sprintf("session %q: %v", item.Label, item.Err))
-			session.AgentState = core.AgentUnknown
-		} else {
-			session.AgentState = core.AgentState(item.State)
-			session.AgentDetail = item.Detail
+			sessions = append(sessions, session)
+			continue
+		}
+		session.Agents = make([]core.Agent, 0, len(item.Blocks))
+		for _, block := range item.Blocks {
+			agent := core.Agent{
+				BlockID:      block.BlockID,
+				BlockLabel:   block.BlockLabel,
+				WindowID:     block.WindowID,
+				WindowLabel:  block.WindowLabel,
+				App:          block.App,
+				EffectiveApp: block.EffectiveApp,
+				State:        block.State,
+				Detail:       block.Detail,
+				Msg:          block.Msg,
+				Title:        block.Title,
+				UpdatedAt:    block.UpdatedAt,
+			}
+			if block.Err != nil {
+				agent.State = core.AgentUnknown
+				agent.Error = block.Err.Error()
+				warnings = append(warnings, fmt.Sprintf("session %q %s: %v", item.Label, agentLocation(block), block.Err))
+			}
+			session.Agents = append(session.Agents, agent)
 		}
 		sessions = append(sessions, session)
 	}
 	return sessions, warnings
+}
+
+// agentLocation names the pane a status warning is about.
+func agentLocation(block rex.BlockStatus) string {
+	window := block.WindowLabel
+	if window == "" {
+		window = shortSession(block.WindowID)
+	}
+	label := block.BlockLabel
+	if label == "" {
+		label = shortSession(block.BlockID)
+	}
+	return fmt.Sprintf("window %q block %q", window, label)
 }
 
 func parseStatusFilters(values []string) ([]config.Status, error) {
@@ -117,19 +155,6 @@ func parseStatusFilters(values []string) ([]config.Status, error) {
 		statuses = append(statuses, status)
 	}
 	return statuses, nil
-}
-
-func agentLabel(ws core.Workstream) string {
-	switch {
-	case ws.AgentState == core.AgentStopped:
-		return "stopped"
-	case ws.AgentState == core.AgentUnknown:
-		return "unknown"
-	case ws.AgentDetail != "":
-		return fmt.Sprintf("%s (%s)", ws.AgentState, ws.AgentDetail)
-	default:
-		return string(ws.AgentState)
-	}
 }
 
 func shortSession(id string) string {

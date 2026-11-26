@@ -119,28 +119,3 @@ func TestParseEventRejectsMalformedInput(t *testing.T) {
 		})
 	}
 }
-
-func TestCombineRecords(t *testing.T) {
-	tests := map[string]struct {
-		records []StatusRecord
-		want    string
-		detail  string
-	}{
-		"empty":               {nil, "idle", ""},
-		"working beats idle":  {[]StatusRecord{{State: "idle"}, {State: "working"}}, "working", ""},
-		"blocked beats work":  {[]StatusRecord{{State: "working"}, {State: "blocked", Kind: "permission"}}, "blocked", "permission"},
-		"error beats working": {[]StatusRecord{{State: "working"}, {State: "error"}}, "error", ""},
-		"done beats idle":     {[]StatusRecord{{State: "idle"}, {State: "done"}}, "done", ""},
-		"unknown is idle":     {[]StatusRecord{{State: "teleporting"}}, "idle", ""},
-		"first blocked kind":  {[]StatusRecord{{State: "blocked", Kind: "question"}, {State: "blocked"}}, "blocked", "question"},
-		"later kind fills in": {[]StatusRecord{{State: "blocked"}, {State: "blocked", Kind: "permission"}}, "blocked", "permission"},
-	}
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			state, detail := combineRecords(test.records)
-			if state != test.want || detail != test.detail {
-				t.Errorf("combineRecords = (%q, %q), want (%q, %q)", state, detail, test.want, test.detail)
-			}
-		})
-	}
-}
