@@ -136,10 +136,10 @@ Running `rexws` with no arguments launches the TUI. Subcommands expose the same 
 | --- | --- |
 | `rexws` / `rexws tui` | Launch the interactive Bubbletea dashboard. |
 | `rexws list [--json] [--status ...]` | List all discovered workstreams with merged Rex + workflow state. |
-| `rexws switch <project/branch>` | Jump to (or create) the Rex session for a workstream. |
-| `rexws status <path> <stage>` | Set workflow status (`in_progress`, `blocked`, `in_review`, `ready`, `done`). |
+| `rexws switch <selector>` | Jump to (or create) the Rex session for a workstream. |
+| `rexws status <selector> <stage>` | Set workflow status (`in_progress`, `blocked`, `in_review`, `ready`, `done`). |
 | `rexws new <project> <branch> [--switch] [--client]` | Create a worktree using the project's configured provider. With `--switch`, also create or select the Rex session `<project>/<branch>` in the new worktree; `--client` chooses the Rex app client for that switch. |
-| `rexws rm <path>` | Close Rex session (if running), run provider's `remove`, clean `state.json`. |
+| `rexws rm <selector>` | Close Rex session (if running), run provider's `remove`, clean `state.json`. |
 | `rexws project add <path>` | Register a Git repo in `config.json`. |
 
 ---

@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/danrabinowitz/rexws/internal/config"
-	"github.com/danrabinowitz/rexws/internal/pathutil"
 )
 
 // StatusChange is the outcome of setting a workstream's workflow status.
@@ -19,21 +18,14 @@ type StatusChange struct {
 	Changed   bool
 }
 
-// SetStatus records a workstream's workflow status. The path must belong to a
+// SetStatus records a workstream's workflow status. The selector must name a
 // discovered worktree.
-func SetStatus(ctx context.Context, cfg config.Config, path string, status config.Status) (StatusChange, error) {
-	canonical, err := pathutil.Canonical(path)
+func SetStatus(ctx context.Context, cfg config.Config, input string, status config.Status) (StatusChange, error) {
+	candidate, err := ResolveWorkstream(ctx, cfg, input)
 	if err != nil {
 		return StatusChange{}, err
 	}
-	discovery := Discover(ctx, cfg)
-	_, _, found, err := discovery.Worktree(canonical)
-	if err != nil {
-		return StatusChange{}, err
-	}
-	if !found {
-		return StatusChange{}, notFoundError(discovery, canonical)
-	}
+	canonical := candidate.Path
 
 	state, err := config.LoadState(cfg.StatusIDs())
 	if err != nil {

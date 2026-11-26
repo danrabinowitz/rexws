@@ -626,6 +626,11 @@ func renderRemoveModal(s State, width, height int) string {
 		" This closes its Rex session and windows, runs the provider remove command,",
 		" and deletes its workflow state.",
 	}
+	for _, warning := range modal.plan.Warnings {
+		if warning != nil {
+			lines = append(lines, "", " Warning: "+render.Sanitize(warning.Error()))
+		}
+	}
 	return fitBody(lines, width, height)
 }
 

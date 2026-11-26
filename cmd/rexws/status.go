@@ -13,11 +13,11 @@ import (
 func newStatusCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "status <path> <stage>",
+		Use:   "status <selector> <stage>",
 		Short: "Set a workstream's workflow status",
 		Long: "Set a workstream's workflow status. Stages are configured in config.json;\n" +
 			"the stage may be given by ID or by its display label.\n" +
-			"PATH is the worktree path shown by `rexws list`.",
+			"SELECTOR uses the grammar in README.md; a literal worktree path still works.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load()
@@ -30,7 +30,7 @@ func newStatusCmd() *cobra.Command {
 			}
 			change, err := ops.SetStatus(cmd.Context(), cfg, args[0], status)
 			if err != nil {
-				return err
+				return resolveError(cfg, args[0], err)
 			}
 
 			if asJSON {

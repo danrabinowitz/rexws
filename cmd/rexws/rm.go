@@ -12,10 +12,11 @@ import (
 func newRmCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "rm <path>",
+		Use:   "rm <selector>",
 		Short: "Remove a workstream's worktree and Rex session",
 		Long: "Close the worktree's Rex session if one is running, run the project's\n" +
 			"provider remove command, and delete its workflow state.\n" +
+			"SELECTOR uses the grammar in README.md; a literal worktree path still works.\n" +
 			"The project's main worktree is refused.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -27,7 +28,16 @@ func newRmCmd() *cobra.Command {
 			if asJSON {
 				providerOut = cmd.ErrOrStderr()
 			}
-			result, err := ops.RemoveWorkstream(cmd.Context(), cfg, args[0], cmd.InOrStdin(), providerOut, cmd.ErrOrStderr())
+			plan, err := ops.PrepareRemove(cmd.Context(), cfg, args[0])
+			if err != nil {
+				return resolveError(cfg, args[0], err)
+			}
+			for _, warning := range plan.Warnings {
+				fmt.Fprintln(cmd.ErrOrStderr(), "warning:", warning)
+			}
+			fmt.Fprintf(providerOut, "Removing %s (%s)\n", plan.SessionName, plan.Path)
+
+			result, err := ops.ExecuteRemove(cmd.Context(), cfg, plan, cmd.InOrStdin(), providerOut, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}

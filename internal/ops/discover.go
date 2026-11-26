@@ -11,7 +11,6 @@ import (
 	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/core"
 	"github.com/danrabinowitz/rexws/internal/git"
-	"github.com/danrabinowitz/rexws/internal/pathutil"
 )
 
 // ProjectError is one project whose worktrees could not be listed. The other
@@ -57,34 +56,6 @@ func Discover(ctx context.Context, cfg config.Config) Discovery {
 		discovery.Inputs = append(discovery.Inputs, core.Input{Project: project, Worktrees: worktrees})
 	}
 	return discovery
-}
-
-// Worktree finds a non-bare, non-prunable worktree by canonical path.
-func (d Discovery) Worktree(path string) (config.Project, git.Worktree, bool, error) {
-	for _, input := range d.Inputs {
-		for _, wt := range input.Worktrees {
-			if wt.Bare || wt.Prunable {
-				continue
-			}
-			candidate, err := pathutil.Canonical(wt.Path)
-			if err != nil {
-				return config.Project{}, git.Worktree{}, false, err
-			}
-			if candidate == path {
-				return input.Project, wt, true, nil
-			}
-		}
-	}
-	return config.Project{}, git.Worktree{}, false, nil
-}
-
-// notFoundError explains a path that is not a discovered worktree, including
-// any project discovery errors that might explain why it was not found.
-func notFoundError(discovery Discovery, path string) error {
-	if err := discovery.Err(); err != nil {
-		return fmt.Errorf("%s is not a worktree of a readable registered project: %w", path, err)
-	}
-	return fmt.Errorf("%s is not a worktree of a registered project; run `rexws list` to see known paths", path)
 }
 
 func projectNames(cfg config.Config) string {

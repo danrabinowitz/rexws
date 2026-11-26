@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -13,13 +14,31 @@ import (
 	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/core"
 	"github.com/danrabinowitz/rexws/internal/ops"
+	"github.com/danrabinowitz/rexws/internal/selector"
 	"github.com/danrabinowitz/rexws/internal/tui"
 )
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "rexws:", err)
-		os.Exit(1)
+		os.Exit(exitCode(err))
+	}
+}
+
+// exitCode gives selector failures stable, scriptable exit codes. Everything
+// else stays 1.
+func exitCode(err error) int {
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, selector.ErrNoActiveWorkstream):
+		return 4
+	case errors.Is(err, selector.ErrAmbiguous):
+		return 3
+	case errors.Is(err, selector.ErrNoMatch):
+		return 2
+	default:
+		return 1
 	}
 }
 

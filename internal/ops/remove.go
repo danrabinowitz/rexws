@@ -26,6 +26,7 @@ type RemovePlan struct {
 	ProviderName string
 	Command      []string
 	Workdir      string
+	Warnings     []error // projects that could not be read, if any
 }
 
 // RemoveResult is a completed removal.
@@ -38,19 +39,19 @@ type RemoveResult struct {
 }
 
 // PrepareRemove runs the main-worktree, dirty-worktree, Rex, and provider
-// pre-checks and renders the provider command without changing anything.
-func PrepareRemove(ctx context.Context, cfg config.Config, path string) (RemovePlan, error) {
-	canonical, err := pathutil.Canonical(path)
+// pre-checks and renders the provider command without changing anything. The
+// selector names the workstream using the shared grammar.
+func PrepareRemove(ctx context.Context, cfg config.Config, input string) (RemovePlan, error) {
+	candidate, discovery, err := resolveWorkstream(ctx, cfg, input)
 	if err != nil {
-		return RemovePlan{}, err
+		return RemovePlan{}, resolutionError(err, discovery)
 	}
-	discovery := Discover(ctx, cfg)
-	project, target, found, err := discovery.Worktree(canonical)
-	if err != nil {
-		return RemovePlan{}, err
-	}
-	if !found {
-		return RemovePlan{}, notFoundError(discovery, canonical)
+	project := candidate.Project
+	canonical := candidate.Path
+
+	var warnings []error
+	if discoveryErr := discovery.Err(); discoveryErr != nil {
+		warnings = append(warnings, discoveryErr)
 	}
 
 	mainPath, err := pathutil.Canonical(project.Path)
@@ -69,11 +70,8 @@ func PrepareRemove(ctx context.Context, cfg config.Config, path string) (RemoveP
 		return RemovePlan{}, fmt.Errorf("worktree %s has uncommitted or untracked changes; commit or discard them first", canonical)
 	}
 
-	branch := target.Branch
-	if branch == "" {
-		branch = target.ShortHead()
-	}
-	sessionName := project.Name + "/" + branch
+	branch := candidate.Branch
+	sessionName := candidate.SessionName
 
 	// Rex must be reachable to close a live session.
 	client := rex.New(cfg.RexBinary())
@@ -130,6 +128,7 @@ func PrepareRemove(ctx context.Context, cfg config.Config, path string) (RemoveP
 		ProviderName: providerName,
 		Command:      removeArgs,
 		Workdir:      workdir,
+		Warnings:     warnings,
 	}, nil
 }
 
@@ -167,12 +166,22 @@ func (p RemovePlan) Cleanup(cfg config.Config) error {
 }
 
 // RemoveWorkstream closes the Rex session, removes the worktree with the
-// project's provider, and deletes the workstream's state.
-func RemoveWorkstream(ctx context.Context, cfg config.Config, path string, stdin io.Reader, stdout, stderr io.Writer) (RemoveResult, error) {
-	plan, err := PrepareRemove(ctx, cfg, path)
+// project's provider, and deletes the workstream's state. The selector names
+// the workstream using the shared grammar. It is the one-shot form for callers
+// that do not need to show the resolved target first; the CLI and TUI use
+// PrepareRemove and ExecuteRemove.
+func RemoveWorkstream(ctx context.Context, cfg config.Config, input string, stdin io.Reader, stdout, stderr io.Writer) (RemoveResult, error) {
+	plan, err := PrepareRemove(ctx, cfg, input)
 	if err != nil {
 		return RemoveResult{}, err
 	}
+	return ExecuteRemove(ctx, cfg, plan, stdin, stdout, stderr)
+}
+
+// ExecuteRemove performs a prepared removal. It is separate from
+// PrepareRemove so a frontend can show the resolved target and any warnings
+// before anything is mutated.
+func ExecuteRemove(ctx context.Context, cfg config.Config, plan RemovePlan, stdin io.Reader, stdout, stderr io.Writer) (RemoveResult, error) {
 	closedSessionID, err := plan.CloseSession(ctx, cfg)
 	if err != nil {
 		return RemoveResult{}, err

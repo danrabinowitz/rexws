@@ -270,9 +270,10 @@ func TestRenderRemoveModal(t *testing.T) {
 	s := renderState(t, 80, 24)
 	s.remove = &removeModal{
 		plan: ops.RemovePlan{
-			Project: config.Project{Name: "rexws"},
-			Path:    "/wt/rexws",
-			Branch:  "m1-m2-core-rex",
+			Project:  config.Project{Name: "rexws"},
+			Path:     "/wt/rexws",
+			Branch:   "m1-m2-core-rex",
+			Warnings: []error{errors.New("project bad: missing")},
 		},
 		project: "rexws",
 		branch:  "m1-m2-core-rex",
@@ -280,7 +281,7 @@ func TestRenderRemoveModal(t *testing.T) {
 	s.mode = ModeRemove
 	out := Render(s)
 	assertScreen(t, out, 80, 24)
-	for _, want := range []string{"Remove rexws/m1-m2-core-rex?", "/wt/rexws", "closes its Rex session", "[y/Enter] confirm"} {
+	for _, want := range []string{"Remove rexws/m1-m2-core-rex?", "/wt/rexws", "closes its Rex session", "Warning: project bad: missing", "[y/Enter] confirm"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("remove modal missing %q:\n%s", want, out)
 		}
