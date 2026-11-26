@@ -9,6 +9,7 @@
 
 * **Core Principle (Enrichment Layer):** Git and Rex are the sources of truth for what *exists*. `rexws` only persists your list of tracked projects, worktree provider configs, and human workflow metadata (`status`, `notes`).
 * **Frontend-Agnostic Core:** All business logic lives in `internal/core`. Every CLI command supports `--json` so a future native macOS launcher (like `resh`) or Raycast extension can shell out to `rexws` without duplicating logic.
+* **Composability Rule:** `rexws` is a substrate, not a platform. Code belongs in this binary only when it is a one-shot derivation from Git, Rex, and `state.json`. Anything that needs its own persistent state, index, cache, schedule, network dependency, or dedicated UI is a separate tool that consumes `rexws --json` and `rexws events --json`; it never becomes a subsystem here. In exchange, the core owes those tools a stable contract: one selector grammar, a versioned JSON shape, a normalized event stream, and machine predicates (`rexws wait`). A feature that needs any of the former is not rejected, only relocated. `IDEAS.md` classifies every known candidate against this rule.
 
 ```text
 rexws/
