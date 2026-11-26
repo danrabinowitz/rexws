@@ -44,9 +44,10 @@ func newSwitchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			branch := strings.TrimPrefix(name, projectName+"/")
 			target, ok := findWorktree(worktrees, project.Name, name)
 			if !ok {
-				return fmt.Errorf("project %q has no worktree for branch %q", projectName, strings.TrimPrefix(name, projectName+"/"))
+				return fmt.Errorf("project %q has no worktree for branch %q; create it with `rexws new %s %s`", projectName, branch, projectName, branch)
 			}
 			path, err := pathutil.Canonical(target.Path)
 			if err != nil {

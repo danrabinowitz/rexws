@@ -212,6 +212,15 @@ func TestRmRefusesMainWorktree(t *testing.T) {
 	}
 }
 
+func TestSwitchSuggestsNewWhenWorktreeMissing(t *testing.T) {
+	repo := testRepo(t)
+	testConfig(t, repo, "", "")
+	_, _, err := runCLI(t, "switch", "repo/missing")
+	if err == nil || !strings.Contains(err.Error(), "rexws new repo missing") {
+		t.Fatalf("err = %v, want a rexws new hint", err)
+	}
+}
+
 func TestRmRefusesDirtyWorktree(t *testing.T) {
 	repo := testRepo(t)
 	root := filepath.Join(t.TempDir(), "worktrees")
