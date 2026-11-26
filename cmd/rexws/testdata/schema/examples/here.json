@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "project": "repo",
+  "branch": "feat/auth",
+  "path": "/Users/you/code/worktrees/repo/feat-auth",
+  "session_name": "repo/feat/auth",
+  "workflow_status": "in_progress",
+  "workflow_status_label": "In Progress",
+  "selector": "repo/feat/auth"
+}

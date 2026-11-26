@@ -59,10 +59,11 @@ func newProjectAddCmd() *cobra.Command {
 			}
 
 			if asJSON {
-				payload := struct {
-					Project config.Project `json:"project"`
-					Created bool           `json:"created"`
-				}{project, created}
+				payload := ProjectAddPayload{
+					SchemaVersion: SchemaVersion,
+					Project:       project,
+					Created:       created,
+				}
 				return encodeJSON(cmd, payload)
 			}
 			if created {

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "project": {
+    "name": "repo",
+    "path": "/Users/you/code/src/repo",
+    "provider": "git",
+    "worktree_root": "/Users/you/code/worktrees/repo"
+  },
+  "created": true
+}

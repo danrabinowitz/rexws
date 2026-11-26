@@ -34,6 +34,17 @@ const (
 	CleanupOrphanSessionLabelConflict CleanupOrphanKind = "session-label-conflict"
 )
 
+// CleanupOrphanKinds is the canonical value set for the JSON contract. The
+// report totals and the `rexws schema` manifest both consume it.
+func CleanupOrphanKinds() []CleanupOrphanKind {
+	return []CleanupOrphanKind{
+		CleanupOrphanUnmatchedSession,
+		CleanupOrphanStaleState,
+		CleanupOrphanUnregisteredWorktree,
+		CleanupOrphanSessionLabelConflict,
+	}
+}
+
 // CleanupOrphan is one reported inconsistency. Every field is always present
 // in JSON: empty values are "", false, or an empty array. Fixable is true only
 // for a stale state entry that cleanup --fix can prove names nothing. Result
@@ -97,12 +108,11 @@ func emptyCleanupOrphans() CleanupOrphans {
 }
 
 func newCleanupOrphanKindCounts() map[string]int {
-	return map[string]int{
-		string(CleanupOrphanUnmatchedSession):     0,
-		string(CleanupOrphanStaleState):           0,
-		string(CleanupOrphanUnregisteredWorktree): 0,
-		string(CleanupOrphanSessionLabelConflict): 0,
+	counts := make(map[string]int, len(CleanupOrphanKinds()))
+	for _, kind := range CleanupOrphanKinds() {
+		counts[string(kind)] = 0
 	}
+	return counts
 }
 
 func listCleanupSessions(ctx context.Context, cfg config.Config) ([]rex.Session, error) {

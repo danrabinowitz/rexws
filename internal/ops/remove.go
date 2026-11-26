@@ -556,15 +556,17 @@ func ExecuteRemove(ctx context.Context, cfg config.Config, plan RemovePlan, stdi
 	if _, err := plan.verifyRex(ctx, cfg); err != nil {
 		return RemoveResult{}, err
 	}
-	if err := provider.Run(ctx, plan.Command, plan.Workdir, stdin, stdout, stderr); err != nil {
-		return RemoveResult{}, fmt.Errorf("provider %q remove: %w", plan.ProviderName, err)
+	// Every pre-check has passed. From here on a mutation may already have
+	// happened, so a failure still returns the partial result: the CLI emits it
+	// as the rm --json document with error set. A retained branch is reported
+	// even when the plan would have deleted it later, because it still exists.
+	keepBranch := func(res RemoveResult) RemoveResult {
+		if retained := plan.retainedBranch(ctx); retained != nil {
+			res.RetainedBranches = append(res.RetainedBranches, *retained)
+		}
+		return res
 	}
-	leftover, err := plan.verifyRemoved(ctx)
-	if err != nil {
-		return RemoveResult{}, err
-	}
-
-	result := RemoveResult{
+	partial := RemoveResult{
 		Project:          plan.Project.Name,
 		Branch:           plan.Branch,
 		Path:             plan.Path,
@@ -575,17 +577,20 @@ func ExecuteRemove(ctx context.Context, cfg config.Config, plan RemovePlan, stdi
 		Warnings:         []string{},
 		Loss:             plan.Loss,
 	}
+	if err := provider.Run(ctx, plan.Command, plan.Workdir, stdin, stdout, stderr); err != nil {
+		return keepBranch(partial), fmt.Errorf("provider %q remove: %w", plan.ProviderName, err)
+	}
+	leftover, err := plan.verifyRemoved(ctx)
+	if err != nil {
+		return keepBranch(partial), err
+	}
+
+	result := partial
 	if leftover != "" {
 		result.Warnings = append(result.Warnings, leftover)
 	}
 	if warning := plan.MissingBranchWarning(ctx); warning != "" {
 		result.Warnings = append(result.Warnings, warning)
-	}
-	keepBranch := func(res RemoveResult) RemoveResult {
-		if retained := plan.retainedBranch(ctx); retained != nil {
-			res.RetainedBranches = append(res.RetainedBranches, *retained)
-		}
-		return res
 	}
 
 	if plan.DeleteBranch && plan.Branch != "" {

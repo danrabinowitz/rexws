@@ -11,23 +11,6 @@ import (
 	"github.com/danrabinowitz/rexws/internal/ops"
 )
 
-// hereJSON is `rexws here --json`. The field names match list and switch where
-// they overlap. selector always resolves to exactly this workstream: it is the
-// exact <project>/<branch> label when that label is unique, and path:<path>
-// otherwise, so a caller never has to know which form it got. session_name
-// stays the human and Rex label, which is not unique for detached worktrees or
-// a branch checked out in two worktrees.
-type hereJSON struct {
-	Project             string        `json:"project"`
-	Branch              string        `json:"branch"`
-	Path                string        `json:"path"`
-	SessionName         string        `json:"session_name"`
-	WorkflowStatus      config.Status `json:"workflow_status"`
-	WorkflowStatusLabel string        `json:"workflow_status_label"`
-	Selector            string        `json:"selector"`
-	Detached            bool          `json:"detached,omitempty"`
-}
-
 func newHereCmd() *cobra.Command {
 	var (
 		dir    string
@@ -68,7 +51,8 @@ func newHereCmd() *cobra.Command {
 			selector := ops.ContextSelector(workstreams, workstream)
 
 			if asJSON {
-				return encodeJSON(cmd, hereJSON{
+				return encodeJSON(cmd, HerePayload{
+					SchemaVersion:       SchemaVersion,
 					Project:             workstream.Project,
 					Branch:              workstream.Branch,
 					Path:                workstream.Path,

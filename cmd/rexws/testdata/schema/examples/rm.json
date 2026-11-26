@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "project": "repo",
+  "branch": "feat/auth",
+  "path": "/Users/you/code/worktrees/repo/feat-auth",
+  "provider": "git",
+  "closed_session_id": "session:auth",
+  "retained_branches": [
+    {
+      "branch": "feat/auth",
+      "state": "unmerged",
+      "default_branch": "main",
+      "commits": [
+        {
+          "sha": "0123456789abcdef0123456789abcdef01234567",
+          "subject": "Add the auth check"
+        }
+      ]
+    }
+  ],
+  "retained": {
+    "branch": "feat/auth",
+    "state": "unmerged",
+    "default_branch": "main",
+    "unpushed_commits": [],
+    "unmerged_commits": [
+      {
+        "sha": "0123456789abcdef0123456789abcdef01234567",
+        "subject": "Add the auth check"
+      }
+    ]
+  },
+  "loss": {
+    "dirty_files": [" M internal/auth.go", "?? notes.txt"],
+    "detached": false,
+    "detached_commits": []
+  }
+}

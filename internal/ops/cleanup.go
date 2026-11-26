@@ -10,12 +10,13 @@ import (
 	"strings"
 
 	"github.com/danrabinowitz/rexws/internal/config"
+	"github.com/danrabinowitz/rexws/internal/contract"
 	"github.com/danrabinowitz/rexws/internal/git"
 )
 
 // CleanupClassification is the primary reason a worktree or branch was
-// classified. It is the stable value scripts and the future S2 JSON contract
-// can switch on.
+// classified. It is the stable value scripts and the frozen JSON contract
+// switch on.
 type CleanupClassification string
 
 const (
@@ -62,6 +63,65 @@ const (
 	CleanupResultRemoved CleanupResult = "removed"
 	CleanupResultFailed  CleanupResult = "failed"
 )
+
+// Cleanup item kinds. They are plain strings in the JSON contract.
+const (
+	CleanupKindWorktree = "worktree"
+	CleanupKindBranch   = "branch"
+)
+
+// The canonical slices below are the single source of truth for the value sets
+// in the JSON contract. The report builders and the `rexws schema` manifest both
+// consume them, and a test compares the manifest enums with these slices.
+func CleanupClassifications() []CleanupClassification {
+	return []CleanupClassification{
+		CleanupPrunable,
+		CleanupMerged,
+		CleanupPatchEquivalent,
+		CleanupUnmerged,
+		CleanupDirty,
+		CleanupProtected,
+		CleanupLocked,
+		CleanupDetached,
+		CleanupActive,
+		CleanupUnknown,
+	}
+}
+
+// CleanupBranchStates includes the empty state a report carries when the branch
+// state could not be assessed.
+func CleanupBranchStates() []CleanupBranchState {
+	return []CleanupBranchState{
+		"",
+		CleanupBranchMerged,
+		CleanupBranchPatchEquivalent,
+		CleanupBranchUnmerged,
+	}
+}
+
+func CleanupActions() []CleanupAction {
+	return []CleanupAction{
+		CleanupActionNone,
+		CleanupActionPrune,
+		CleanupActionRemoveWorktree,
+		CleanupActionDeleteBranch,
+		CleanupActionRemoveWorktreeAndBranch,
+	}
+}
+
+// CleanupResults includes the empty result a preview and a refused fix carry.
+func CleanupResults() []CleanupResult {
+	return []CleanupResult{
+		"",
+		CleanupResultKept,
+		CleanupResultRemoved,
+		CleanupResultFailed,
+	}
+}
+
+func CleanupKinds() []string {
+	return []string{CleanupKindWorktree, CleanupKindBranch}
+}
 
 // CleanupOptions selects what to scan and whether to mutate. The zero value is
 // the report-only default. Fix makes a state.json read failure loud instead of
@@ -136,7 +196,7 @@ type CleanupTotals struct {
 }
 
 // CleanupReport is the stable JSON document behind `rexws cleanup --json`.
-// SchemaVersion is 1 for this shape. Projects, Items, and Orphans.Items are
+// SchemaVersion is the contract version for this shape. Projects, Items, and Orphans.Items are
 // sorted, so two scans of the same repository produce identical JSON. The
 // Orphans section is an additive extension; it does not change Projects or
 // Totals.
@@ -184,7 +244,7 @@ func PlanCleanup(ctx context.Context, cfg config.Config, opts CleanupOptions) (C
 	}
 
 	report := CleanupReport{
-		SchemaVersion: 1,
+		SchemaVersion: contract.SchemaVersion,
 		Force:         opts.Force,
 		Projects:      make([]CleanupProject, 0, len(projects)),
 		Orphans:       emptyCleanupOrphans(),
@@ -588,7 +648,7 @@ func planCleanupProject(ctx context.Context, project config.Project, opts Cleanu
 func planCleanupWorktree(ctx context.Context, project config.Project, worktree git.Worktree, mainPath, base string, active map[string][]string, opts CleanupOptions) CleanupItem {
 	item := CleanupItem{
 		Project:  project.Name,
-		Kind:     "worktree",
+		Kind:     CleanupKindWorktree,
 		Path:     worktree.Path,
 		Head:     worktree.Head,
 		Branch:   worktree.Branch,
@@ -681,7 +741,7 @@ func planCleanupWorktree(ctx context.Context, project config.Project, worktree g
 func planCleanupBranch(ctx context.Context, project config.Project, branch, base string, active map[string][]string, opts CleanupOptions) CleanupItem {
 	item := CleanupItem{
 		Project: project.Name,
-		Kind:    "branch",
+		Kind:    CleanupKindBranch,
 		Branch:  branch,
 		Action:  CleanupActionNone,
 	}
@@ -979,17 +1039,9 @@ func sortCleanupItems(items []CleanupItem) {
 }
 
 func newClassificationCounts() map[string]int {
-	counts := map[string]int{
-		string(CleanupPrunable):        0,
-		string(CleanupMerged):          0,
-		string(CleanupPatchEquivalent): 0,
-		string(CleanupUnmerged):        0,
-		string(CleanupDirty):           0,
-		string(CleanupProtected):       0,
-		string(CleanupLocked):          0,
-		string(CleanupDetached):        0,
-		string(CleanupActive):          0,
-		string(CleanupUnknown):         0,
+	counts := make(map[string]int, len(CleanupClassifications()))
+	for _, classification := range CleanupClassifications() {
+		counts[string(classification)] = 0
 	}
 	return counts
 }

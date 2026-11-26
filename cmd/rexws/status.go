@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -34,12 +33,13 @@ func newStatusCmd() *cobra.Command {
 			}
 
 			if asJSON {
-				return encodeJSON(cmd, struct {
-					Path                string        `json:"path"`
-					WorkflowStatus      config.Status `json:"workflow_status"`
-					WorkflowStatusLabel string        `json:"workflow_status_label"`
-					UpdatedAt           time.Time     `json:"updated_at"`
-				}{change.Path, change.Status, change.Label, change.UpdatedAt})
+				return encodeJSON(cmd, StatusPayload{
+					SchemaVersion:       SchemaVersion,
+					Path:                change.Path,
+					WorkflowStatus:      change.Status,
+					WorkflowStatusLabel: change.Label,
+					UpdatedAt:           change.UpdatedAt,
+				})
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%s is now %s\n", change.Path, change.Label)
 			return nil

@@ -100,10 +100,14 @@ func TestStatusResolvesSelectors(t *testing.T) {
 			t.Fatalf("status %q: %v\nstderr: %s", tt.input, err, stderr)
 		}
 		var change struct {
-			Path string `json:"path"`
+			SchemaVersion int    `json:"schema_version"`
+			Path          string `json:"path"`
 		}
 		if err := json.Unmarshal([]byte(stdout), &change); err != nil {
 			t.Fatalf("parse JSON %q: %v", stdout, err)
+		}
+		if change.SchemaVersion != SchemaVersion {
+			t.Errorf("status schema_version = %d, want %d", change.SchemaVersion, SchemaVersion)
 		}
 		if change.Path != tt.want {
 			t.Errorf("status %q path = %s, want %s", tt.input, change.Path, tt.want)

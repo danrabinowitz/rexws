@@ -54,10 +54,11 @@ func newListCmd() *cobra.Command {
 			}
 
 			if asJSON {
-				return encodeJSON(cmd, struct {
-					Workstreams []core.Workstream `json:"workstreams"`
-					Warnings    []string          `json:"warnings,omitempty"`
-				}{workstreams, warnings})
+				return encodeJSON(cmd, ListPayload{
+					SchemaVersion: SchemaVersion,
+					Workstreams:   workstreams,
+					Warnings:      warnings,
+				})
 			}
 
 			if len(workstreams) == 0 {

@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "applied": false,
+  "force": false,
+  "projects": [
+    {
+      "project": "repo",
+      "path": "/Users/you/code/src/repo",
+      "default_branch": "main",
+      "items": [
+        {
+          "project": "repo",
+          "kind": "worktree",
+          "path": "/Users/you/code/worktrees/repo/feat-done",
+          "branch": "feat/done",
+          "head": "0123456789abcdef0123456789abcdef01234567",
+          "classification": "merged",
+          "branch_state": "merged",
+          "safe": true,
+          "removable": true,
+          "requires_force": false,
+          "dirty": false,
+          "locked": false,
+          "detached": false,
+          "active_session": false,
+          "session_id": "",
+          "action": "remove-worktree-and-branch",
+          "result": "",
+          "detail": "branch is merged into main",
+          "loss": null,
+          "error": ""
+        }
+      ]
+    }
+  ],
+  "orphans": {
+    "fixed": false,
+    "complete": true,
+    "items": [
+      {
+        "kind": "stale-state",
+        "project": "repo",
+        "label": "",
+        "path": "/Users/you/code/worktrees/repo/feat-gone",
+        "session_ids": [],
+        "detail": "state.json entry points at a path that no longer exists and is not a current Git worktree",
+        "fixable": true,
+        "result": "",
+        "error": ""
+      }
+    ],
+    "totals": {
+      "scanned": 1,
+      "fixable": 1,
+      "removed": 0,
+      "failed": 0,
+      "kept": 0,
+      "by_kind": {
+        "session-label-conflict": 0,
+        "stale-state": 1,
+        "unmatched-session": 0,
+        "unregistered-worktree": 0
+      }
+    }
+  },
+  "totals": {
+    "scanned": 1,
+    "safe": 1,
+    "removable": 1,
+    "kept": 0,
+    "removed": 0,
+    "failed": 0,
+    "by_classification": {
+      "active": 0,
+      "detached": 0,
+      "dirty": 0,
+      "locked": 0,
+      "merged": 1,
+      "patch-equivalent": 0,
+      "prunable": 0,
+      "protected": 0,
+      "unmerged": 0,
+      "unknown": 0
+    }
+  },
+  "warnings": [],
+  "errors": []
+}

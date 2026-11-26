@@ -23,7 +23,8 @@ func TestListJSONPopulatesStatusLabelAndDegradesWithoutRex(t *testing.T) {
 		t.Fatalf("list: %v", err)
 	}
 	var payload struct {
-		Workstreams []struct {
+		SchemaVersion int `json:"schema_version"`
+		Workstreams   []struct {
 			Project             string   `json:"project"`
 			Branch              string   `json:"branch"`
 			WorkflowStatus      string   `json:"workflow_status"`
@@ -38,6 +39,9 @@ func TestListJSONPopulatesStatusLabelAndDegradesWithoutRex(t *testing.T) {
 	}
 	if len(payload.Workstreams) != 1 {
 		t.Fatalf("workstreams = %#v", payload.Workstreams)
+	}
+	if payload.SchemaVersion != SchemaVersion {
+		t.Errorf("schema_version = %d, want %d", payload.SchemaVersion, SchemaVersion)
 	}
 	ws := payload.Workstreams[0]
 	if ws.WorkflowStatus != "ready" || ws.WorkflowStatusLabel != "Ready" {

@@ -15,25 +15,9 @@ import (
 	"github.com/danrabinowitz/rexws/internal/render"
 )
 
-// rmJSON is the stable result document for rm --json. Error is set on a
-// partial failure after the worktree was already removed, so stdout still
-// carries the retained-branch report and the reason.
-type rmJSON struct {
-	Project          string               `json:"project"`
-	Branch           string               `json:"branch"`
-	Path             string               `json:"path"`
-	Provider         string               `json:"provider"`
-	ClosedSessionID  string               `json:"closed_session_id,omitempty"`
-	DeletedBranch    string               `json:"deleted_branch,omitempty"`
-	RetainedBranches []ops.RetainedBranch `json:"retained_branches"`
-	Retained         *ops.RemoveRetained  `json:"retained,omitempty"`
-	Warnings         []string             `json:"warnings,omitempty"`
-	Loss             *ops.RemoveLoss      `json:"loss,omitempty"`
-	Error            string               `json:"error,omitempty"`
-}
-
-func newRmJSON(result ops.RemoveResult, force bool, err error) rmJSON {
-	doc := rmJSON{
+func newRmPayload(result ops.RemoveResult, force bool, err error) RmPayload {
+	doc := RmPayload{
+		SchemaVersion:    SchemaVersion,
 		Project:          result.Project,
 		Branch:           result.Branch,
 		Path:             result.Path,
@@ -128,7 +112,7 @@ func newRmCmd() *cobra.Command {
 				// the structured result so a script can see the retained
 				// branch and the reason.
 				if asJSON && result.Path != "" {
-					if encodeErr := encodeJSON(cmd, newRmJSON(result, force, err)); encodeErr != nil {
+					if encodeErr := encodeJSON(cmd, newRmPayload(result, force, err)); encodeErr != nil {
 						return encodeErr
 					}
 				}
@@ -138,7 +122,7 @@ func newRmCmd() *cobra.Command {
 			}
 
 			if asJSON {
-				return encodeJSON(cmd, newRmJSON(result, force, nil))
+				return encodeJSON(cmd, newRmPayload(result, force, nil))
 			}
 			message := fmt.Sprintf("Removed worktree %s", result.Path)
 			if result.ClosedSessionID != "" {

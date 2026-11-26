@@ -1,0 +1,1005 @@
+{
+  "format": "rexws-field-manifest",
+  "schema_version": 1,
+  "commands": [
+    {
+      "name": "list",
+      "description": "Discovered workstreams merged with workflow and Rex state.",
+      "root": "ListPayload",
+      "schema_version": 1
+    },
+    {
+      "name": "status",
+      "description": "The workstream path and workflow stage recorded by status.",
+      "root": "StatusPayload",
+      "schema_version": 1
+    },
+    {
+      "name": "switch",
+      "description": "The Rex session and optional window selected by switch.",
+      "root": "SwitchPayload",
+      "schema_version": 1
+    },
+    {
+      "name": "new",
+      "description": "The worktree created by new, plus the Rex session when --switch was used.",
+      "root": "NewPayload",
+      "schema_version": 1
+    },
+    {
+      "name": "rm",
+      "description": "The removal result, including retained branches, loss, and partial-failure reason.",
+      "root": "RmPayload",
+      "schema_version": 1
+    },
+    {
+      "name": "project add",
+      "description": "The project registration made by project add.",
+      "root": "ProjectAddPayload",
+      "schema_version": 1
+    },
+    {
+      "name": "here",
+      "description": "The workstream containing the current directory.",
+      "root": "HerePayload",
+      "schema_version": 1
+    },
+    {
+      "name": "cleanup",
+      "description": "The preview-first cleanup report with worktree, branch, and orphan classifications.",
+      "root": "CleanupReport",
+      "schema_version": 1
+    }
+  ],
+  "types": {
+    "Agent": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "block_id",
+          "type": "string"
+        },
+        {
+          "name": "block_label",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "window_id",
+          "type": "string"
+        },
+        {
+          "name": "window_label",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "app",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "effective_app",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "state",
+          "type": "string",
+          "ref": "State"
+        },
+        {
+          "name": "detail",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "msg",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "updated_at",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "error",
+          "type": "string",
+          "optional": true
+        }
+      ]
+    },
+    "CleanupAction": {
+      "type": "string",
+      "enum": [
+        "none",
+        "prune",
+        "remove-worktree",
+        "delete-branch",
+        "remove-worktree-and-branch"
+      ]
+    },
+    "CleanupBranchState": {
+      "type": "string",
+      "enum": [
+        "",
+        "merged",
+        "patch-equivalent",
+        "unmerged"
+      ]
+    },
+    "CleanupClassification": {
+      "type": "string",
+      "enum": [
+        "prunable",
+        "merged",
+        "patch-equivalent",
+        "unmerged",
+        "dirty",
+        "protected",
+        "locked",
+        "detached",
+        "active",
+        "unknown"
+      ]
+    },
+    "CleanupItem": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "project",
+          "type": "string"
+        },
+        {
+          "name": "kind",
+          "type": "string",
+          "enum": [
+            "worktree",
+            "branch"
+          ]
+        },
+        {
+          "name": "path",
+          "type": "string"
+        },
+        {
+          "name": "branch",
+          "type": "string"
+        },
+        {
+          "name": "head",
+          "type": "string"
+        },
+        {
+          "name": "classification",
+          "type": "string",
+          "ref": "CleanupClassification"
+        },
+        {
+          "name": "branch_state",
+          "type": "string",
+          "ref": "CleanupBranchState"
+        },
+        {
+          "name": "safe",
+          "type": "boolean"
+        },
+        {
+          "name": "removable",
+          "type": "boolean"
+        },
+        {
+          "name": "requires_force",
+          "type": "boolean"
+        },
+        {
+          "name": "dirty",
+          "type": "boolean"
+        },
+        {
+          "name": "locked",
+          "type": "boolean"
+        },
+        {
+          "name": "detached",
+          "type": "boolean"
+        },
+        {
+          "name": "active_session",
+          "type": "boolean"
+        },
+        {
+          "name": "session_id",
+          "type": "string"
+        },
+        {
+          "name": "action",
+          "type": "string",
+          "ref": "CleanupAction"
+        },
+        {
+          "name": "result",
+          "type": "string",
+          "ref": "CleanupResult"
+        },
+        {
+          "name": "detail",
+          "type": "string"
+        },
+        {
+          "name": "loss",
+          "type": "object",
+          "ref": "CleanupLoss",
+          "nullable": true
+        },
+        {
+          "name": "error",
+          "type": "string"
+        }
+      ]
+    },
+    "CleanupLoss": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "dirty_files",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "commits",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "ref": "Commit"
+          }
+        }
+      ]
+    },
+    "CleanupOrphan": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "kind",
+          "type": "string",
+          "ref": "CleanupOrphanKind"
+        },
+        {
+          "name": "project",
+          "type": "string"
+        },
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "path",
+          "type": "string"
+        },
+        {
+          "name": "session_ids",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "detail",
+          "type": "string"
+        },
+        {
+          "name": "fixable",
+          "type": "boolean"
+        },
+        {
+          "name": "result",
+          "type": "string",
+          "ref": "CleanupResult"
+        },
+        {
+          "name": "error",
+          "type": "string"
+        }
+      ]
+    },
+    "CleanupOrphanKind": {
+      "type": "string",
+      "enum": [
+        "unmatched-session",
+        "stale-state",
+        "unregistered-worktree",
+        "session-label-conflict"
+      ]
+    },
+    "CleanupOrphanTotals": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "scanned",
+          "type": "integer"
+        },
+        {
+          "name": "fixable",
+          "type": "integer"
+        },
+        {
+          "name": "removed",
+          "type": "integer"
+        },
+        {
+          "name": "failed",
+          "type": "integer"
+        },
+        {
+          "name": "kept",
+          "type": "integer"
+        },
+        {
+          "name": "by_kind",
+          "type": "object",
+          "values": {
+            "type": "integer"
+          }
+        }
+      ]
+    },
+    "CleanupOrphans": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "fixed",
+          "type": "boolean"
+        },
+        {
+          "name": "complete",
+          "type": "boolean"
+        },
+        {
+          "name": "items",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "ref": "CleanupOrphan"
+          }
+        },
+        {
+          "name": "totals",
+          "type": "object",
+          "ref": "CleanupOrphanTotals"
+        }
+      ]
+    },
+    "CleanupProject": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "project",
+          "type": "string"
+        },
+        {
+          "name": "path",
+          "type": "string"
+        },
+        {
+          "name": "default_branch",
+          "type": "string"
+        },
+        {
+          "name": "items",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "ref": "CleanupItem"
+          }
+        }
+      ]
+    },
+    "CleanupReport": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "schema_version",
+          "type": "integer",
+          "const": 1
+        },
+        {
+          "name": "applied",
+          "type": "boolean"
+        },
+        {
+          "name": "force",
+          "type": "boolean"
+        },
+        {
+          "name": "projects",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "ref": "CleanupProject"
+          }
+        },
+        {
+          "name": "orphans",
+          "type": "object",
+          "ref": "CleanupOrphans"
+        },
+        {
+          "name": "totals",
+          "type": "object",
+          "ref": "CleanupTotals"
+        },
+        {
+          "name": "warnings",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "errors",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "CleanupResult": {
+      "type": "string",
+      "enum": [
+        "",
+        "kept",
+        "removed",
+        "failed"
+      ]
+    },
+    "CleanupTotals": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "scanned",
+          "type": "integer"
+        },
+        {
+          "name": "safe",
+          "type": "integer"
+        },
+        {
+          "name": "removable",
+          "type": "integer"
+        },
+        {
+          "name": "kept",
+          "type": "integer"
+        },
+        {
+          "name": "removed",
+          "type": "integer"
+        },
+        {
+          "name": "failed",
+          "type": "integer"
+        },
+        {
+          "name": "by_classification",
+          "type": "object",
+          "values": {
+            "type": "integer"
+          }
+        }
+      ]
+    },
+    "Commit": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "sha",
+          "type": "string"
+        },
+        {
+          "name": "subject",
+          "type": "string"
+        }
+      ]
+    },
+    "HerePayload": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "schema_version",
+          "type": "integer",
+          "const": 1
+        },
+        {
+          "name": "project",
+          "type": "string"
+        },
+        {
+          "name": "branch",
+          "type": "string"
+        },
+        {
+          "name": "path",
+          "type": "string"
+        },
+        {
+          "name": "session_name",
+          "type": "string"
+        },
+        {
+          "name": "workflow_status",
+          "type": "string",
+          "ref": "Status"
+        },
+        {
+          "name": "workflow_status_label",
+          "type": "string"
+        },
+        {
+          "name": "selector",
+          "type": "string"
+        },
+        {
+          "name": "detached",
+          "type": "boolean",
+          "optional": true
+        }
+      ]
+    },
+    "ListPayload": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "schema_version",
+          "type": "integer",
+          "const": 1
+        },
+        {
+          "name": "workstreams",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "ref": "Workstream"
+          }
+        },
+        {
+          "name": "warnings",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    "NewPayload": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "schema_version",
+          "type": "integer",
+          "const": 1
+        },
+        {
+          "name": "project",
+          "type": "string"
+        },
+        {
+          "name": "branch",
+          "type": "string"
+        },
+        {
+          "name": "path",
+          "type": "string"
+        },
+        {
+          "name": "provider",
+          "type": "string"
+        },
+        {
+          "name": "session_id",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "session_created",
+          "type": "boolean",
+          "optional": true
+        }
+      ]
+    },
+    "Project": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "path",
+          "type": "string"
+        },
+        {
+          "name": "provider",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "worktree_root",
+          "type": "string",
+          "optional": true
+        }
+      ]
+    },
+    "ProjectAddPayload": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "schema_version",
+          "type": "integer",
+          "const": 1
+        },
+        {
+          "name": "project",
+          "type": "object",
+          "ref": "Project"
+        },
+        {
+          "name": "created",
+          "type": "boolean"
+        }
+      ]
+    },
+    "RemoveLoss": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "dirty_files",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "detached",
+          "type": "boolean"
+        },
+        {
+          "name": "detached_commits",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "ref": "Commit"
+          }
+        },
+        {
+          "name": "assessment_error",
+          "type": "string",
+          "optional": true
+        }
+      ]
+    },
+    "RemoveRetained": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "branch",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "state",
+          "type": "string",
+          "ref": "CleanupBranchState",
+          "optional": true
+        },
+        {
+          "name": "default_branch",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "unpushed_commits",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "ref": "Commit"
+          }
+        },
+        {
+          "name": "unmerged_commits",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "ref": "Commit"
+          }
+        }
+      ]
+    },
+    "RetainedBranch": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "branch",
+          "type": "string"
+        },
+        {
+          "name": "state",
+          "type": "string",
+          "ref": "CleanupBranchState"
+        },
+        {
+          "name": "default_branch",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "commits",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "ref": "Commit"
+          },
+          "optional": true
+        },
+        {
+          "name": "error",
+          "type": "string",
+          "optional": true
+        }
+      ]
+    },
+    "RmPayload": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "schema_version",
+          "type": "integer",
+          "const": 1
+        },
+        {
+          "name": "project",
+          "type": "string"
+        },
+        {
+          "name": "branch",
+          "type": "string"
+        },
+        {
+          "name": "path",
+          "type": "string"
+        },
+        {
+          "name": "provider",
+          "type": "string"
+        },
+        {
+          "name": "closed_session_id",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "deleted_branch",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "retained_branches",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "ref": "RetainedBranch"
+          }
+        },
+        {
+          "name": "retained",
+          "type": "object",
+          "ref": "RemoveRetained",
+          "optional": true
+        },
+        {
+          "name": "warnings",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "loss",
+          "type": "object",
+          "ref": "RemoveLoss",
+          "optional": true
+        },
+        {
+          "name": "error",
+          "type": "string",
+          "optional": true
+        }
+      ]
+    },
+    "State": {
+      "type": "string",
+      "enum": [
+        "blocked",
+        "error",
+        "working",
+        "unknown",
+        "done",
+        "idle",
+        "stopped"
+      ]
+    },
+    "Status": {
+      "type": "string"
+    },
+    "StatusPayload": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "schema_version",
+          "type": "integer",
+          "const": 1
+        },
+        {
+          "name": "path",
+          "type": "string"
+        },
+        {
+          "name": "workflow_status",
+          "type": "string",
+          "ref": "Status"
+        },
+        {
+          "name": "workflow_status_label",
+          "type": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "string",
+          "format": "date-time"
+        }
+      ]
+    },
+    "SwitchPayload": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "schema_version",
+          "type": "integer",
+          "const": 1
+        },
+        {
+          "name": "session_name",
+          "type": "string"
+        },
+        {
+          "name": "session_id",
+          "type": "string"
+        },
+        {
+          "name": "window_id",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "window_label",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "created",
+          "type": "boolean"
+        }
+      ]
+    },
+    "Window": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "window_id",
+          "type": "string"
+        },
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "active",
+          "type": "boolean"
+        },
+        {
+          "name": "focused_block_id",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "block_ids",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    "Workstream": {
+      "type": "object",
+      "fields": [
+        {
+          "name": "project",
+          "type": "string"
+        },
+        {
+          "name": "branch",
+          "type": "string"
+        },
+        {
+          "name": "path",
+          "type": "string"
+        },
+        {
+          "name": "session_name",
+          "type": "string"
+        },
+        {
+          "name": "workflow_status",
+          "type": "string",
+          "ref": "Status"
+        },
+        {
+          "name": "workflow_status_label",
+          "type": "string"
+        },
+        {
+          "name": "note",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "rex_session_id",
+          "type": "string"
+        },
+        {
+          "name": "agent_state",
+          "type": "string",
+          "ref": "State"
+        },
+        {
+          "name": "agent_detail",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "agents",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "ref": "Agent"
+          }
+        },
+        {
+          "name": "windows",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "ref": "Window"
+          }
+        },
+        {
+          "name": "detached",
+          "type": "boolean",
+          "optional": true
+        }
+      ]
+    }
+  }
+}

@@ -141,6 +141,35 @@ Running `rexws` with no arguments launches the TUI. Subcommands expose the same 
 | `rexws new <project> <branch> [--switch] [--client]` | Create a worktree using the project's configured provider. With `--switch`, also create or select the Rex session `<project>/<branch>` in the new worktree; `--client` chooses the Rex app client for that switch. |
 | `rexws rm <selector> [--force] [--yes] [--delete-branch] [--json]` | Close Rex session (if running), re-verify the worktree, run the provider's `remove`, clean `state.json`. `--force` prints discarded paths and unique detached-HEAD commits and confirms; retained-branch state is reported separately. `--delete-branch` is the only branch-deletion path and deletes the branch only when merged or patch-equivalent to the default branch; an unmerged branch is never deleted. A provider `remove` must not delete the branch. |
 | `rexws project add <path>` | Register a Git repo in `config.json`. |
+| `rexws schema` | Print the machine-readable JSON contract. Needs no config, Rex, or repository. |
+
+### JSON contract
+
+On success, every `--json` command writes exactly one document to stdout with a
+top-level `schema_version` (currently `1`). Warnings and progress go to stderr.
+On failure the error goes to stderr; `rm` writes its partial-failure document
+with `error` set, and `here` writes nothing outside a registered worktree. The
+commands covered by the contract are `list`, `status`, `switch`, `new`, `rm`,
+`project add`, `here`, and `cleanup`.
+`docs/json-schema.md` documents every field, type, enum, nullable field, and
+omitted field; `rexws schema` emits the same contract as a field manifest
+derived from the payload types.
+
+The version follows one rule:
+
+- **Additive changes keep the version.** Adding a field, an optional nested
+  field, an enum value, or a command does not change `schema_version`.
+  Consumers must ignore unknown fields.
+- **Breaking changes bump the version.** Breaking means removing or renaming a
+  command, field, or type; changing a field's JSON type, array item type, or
+  map value type; changing whether a field is always present or can be `null`;
+  removing or narrowing an enum; adding a required field; changing the meaning
+  of an existing value; or changing a fixed `const` such as `schema_version`.
+
+A version bump adds a new frozen fixture (`cmd/rexws/testdata/schema/v<p>.json`);
+existing fixtures are never edited. Golden tests validate every command's
+example document against the manifest and fail on any shape change that was not
+recorded deliberately. `rexws events` and satellites are outside this contract.
 
 ---
 

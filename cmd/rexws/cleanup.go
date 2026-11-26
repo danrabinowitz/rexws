@@ -47,7 +47,7 @@ func newCleanupCmd() *cobra.Command {
 			"or adopts sessions. It asks for confirmation on a terminal; scripts and\n" +
 			"--json runs with candidates must pass --yes. --fix cannot be combined\n" +
 			"with --apply or --force.\n" +
-			"--project narrows the scan; --json emits the schema_version 1 report.",
+			"--project narrows the scan; --json emits the versioned report.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if fix && apply {

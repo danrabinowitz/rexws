@@ -184,15 +184,15 @@ unmerged commits:
 Retained branch feat/auth: unmerged, 2 commit(s) not in main.
 ```
 
-The `--json` result carries `deleted_branch`, `retained_branches` (`branch`,
-`state`, `default_branch`, `commits`, `error`), `warnings`, `retained` when a
-branch is kept (plan-time `branch`, `state`, `default_branch`,
-`unpushed_commits`, `unmerged_commits`), and, for `--force`, `loss`. `loss` is
-only what is discarded: `dirty_files`, `detached`, `detached_commits`, and
-`assessment_error`. The CLI's `LOSS` and `RETAINED` sections use the same
-split. A partial failure after the worktree was removed still emits the JSON
-document with `error` set and `retained_branches` populated, then exits
-nonzero.
+The `--json` result carries `schema_version`, `deleted_branch`,
+`retained_branches` (`branch`, `state`, `default_branch`, `commits`, `error`),
+`warnings`, `retained` when a branch is kept (plan-time `branch`, `state`,
+`default_branch`, `unpushed_commits`, `unmerged_commits`), and, for `--force`,
+`loss`. `loss` is only what is discarded: `dirty_files`, `detached`,
+`detached_commits`, and `assessment_error`. The CLI's `LOSS` and `RETAINED`
+sections use the same split. A partial failure after the worktree was removed
+still emits the JSON document with `schema_version` and `error` set and
+`retained_branches` populated, then exits nonzero.
 
 Provider contract: a remove command must deregister the worktree and must not
 delete the branch. `--delete-branch` is the only branch-deletion path. If a
@@ -223,6 +223,7 @@ proof refuses and keeps the worktree or branch.
 | `rexws status <selector> <stage> [--json]` | Set a workstream's workflow status, by ID or label. |
 | `rexws rm <selector> [--json] [--force] [--yes] [--delete-branch]` | Close the session, remove the worktree, clear its metadata; with `--delete-branch`, delete the branch only when merged or patch-equivalent. |
 | `rexws cleanup [--project <name>] [--json] [--apply] [--force] [--fix [--yes]]` | Report every worktree, branch, and orphan with a reason; remove only the provably safe set and prune only provably stale `state.json` entries. |
+| `rexws schema` | Print the machine-readable JSON contract; needs no config, Rex, or repository. |
 
 ### Selecting a workstream
 
@@ -294,6 +295,7 @@ detached worktree:
 
 ```json
 {
+  "schema_version": 1,
   "project": "repo",
   "branch": "feat/auth",
   "path": "/Users/you/code/worktrees/repo/feat-auth",
@@ -454,11 +456,11 @@ Detection rules:
   is pruned and that entry is reported `failed`. If a project cannot be
   re-read, the fix refuses before the per-item loop, so results stay empty.
 
-`--json` emits a `schema_version: 1` document. The version is provisional until
-`S2 · Frozen JSON contract`; the shape is fixed because every item carries
-every key. Projects are sorted by name and items by branch, kind, and path, so
-two reports of the same repositories are byte-identical. Every worktree or
-branch item carries `project`, `kind` (`worktree` or `branch`), `path`,
+`--json` emits a `schema_version: 1` document. The shape is frozen; see
+[JSON contract](#json-contract). It is fixed because every item carries every
+key. Projects are sorted by name and items by branch, kind, and path, so two
+reports of the same repositories are byte-identical. Every worktree or branch
+item carries `project`, `kind` (`worktree` or `branch`), `path`,
 `branch`, `head`, `classification`, `branch_state`, `safe`, `removable`,
 `requires_force`, `dirty`, `locked`, `detached`, `active_session`,
 `session_id`, `action`, `result`, `detail`, `loss`, and `error`. Empty values
@@ -518,8 +520,8 @@ could not be loaded, or an entry could not be checked. Scripts must treat
 stays empty in a preview or a fix that refused before the per-item loop; after
 an authorized fix pass every item is `kept`, `removed`, or `failed`, so the
 report names exactly what was pruned and what was retained.
-`orphans.totals.by_kind` always includes all four kinds. This is the candidate
-shape for the frozen contract; the other commands' JSON remains unfrozen.
+`orphans.totals.by_kind` always includes all four kinds. This section is
+additive: it does not change `projects` or `totals`.
 
 Cleanup is deliberately not scheduled and does not kill Rex sessions. It also
 never deletes a branch it cannot prove merged or patch-equivalent without
@@ -545,11 +547,21 @@ provider deregistered the worktree but left its directory.
 
 See `TUI-UX.md` for the full UX design.
 
+## JSON contract
+
 Every command that reports data accepts `--json` for scripts and future
-launchers. Most JSON shapes are usable but **not frozen** — they have no
-`schema_version` yet, so treat them as unstable. `cleanup` is the provisional
-exception: it emits `"schema_version": 1`, carries a fixed key set, sorts its
-projects and items, and is the candidate shape for the frozen contract.
+launchers. Every payload carries `"schema_version": 1` and is frozen: see
+`docs/json-schema.md` for every field, type, enum, nullable field, and omitted
+field. `rexws schema` prints the same contract as a machine-readable field
+manifest without needing config, Rex, or a repository. Field changes track the
+payload types automatically; enum and command drift requires a deliberate
+canonical-slice and command-coverage test update. `cmd/rexws` golden tests
+compare the CLI output with a pinned fixture and validate one example per
+command.
+
+Additive fields keep the version. Removing or renaming a field, changing a
+field's type or presence, removing an enum value, or adding a required field is
+breaking and bumps `schema_version`. Consumers must ignore unknown fields.
 
 ---
 
@@ -695,8 +707,9 @@ Stated now so they stop being relitigated:
 - **No session adoption yet.** Matching is exact on `<project>/<branch>`, so
   sessions you named by hand show as stopped. Adoption is a future candidate.
 - **No notes UX yet.** `state.json` stores notes; nothing edits them.
-- **No frozen JSON schema, Rex version check, config-schema version, or
-  provider timeouts yet.**
+- **No JSON Schema document.** The JSON contract is frozen as a field manifest
+  (`rexws schema`), not JSON Schema. Also no Rex version check, config-schema
+  version, or provider timeouts yet.
 
 ---
 
@@ -762,8 +775,8 @@ may change without migration support.
   detector, on Linux; Windows is untested.
 - Verified against Rex `0.1.0-preview.25` (API revision 24). There is no Rex
   version check, so a preview drift can break the adapter.
-- The JSON contract is not frozen. `cleanup` emits provisional
-  `schema_version: 1`; the other commands have no `schema_version` yet.
+- The JSON contract is frozen at `schema_version: 1`. Additive changes keep the
+  version; breaking changes bump it. See [JSON contract](#json-contract).
 
 See `ROADMAP.md` for what is committed next, `SPEC.md` for the current design,
 `IDEAS.md` for the unranked idea bank, and `TUI-UX.md` for the TUI UX.

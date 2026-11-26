@@ -9,15 +9,6 @@ import (
 	"github.com/danrabinowitz/rexws/internal/ops"
 )
 
-type newPayload struct {
-	Project        string `json:"project"`
-	Branch         string `json:"branch"`
-	Path           string `json:"path"`
-	Provider       string `json:"provider"`
-	SessionID      string `json:"session_id,omitempty"`
-	SessionCreated *bool  `json:"session_created,omitempty"`
-}
-
 func newNewCmd() *cobra.Command {
 	var (
 		asJSON   bool
@@ -80,11 +71,12 @@ func newNewCmd() *cobra.Command {
 			}
 
 			if asJSON {
-				payload := newPayload{
-					Project:  result.Project,
-					Branch:   result.Branch,
-					Path:     result.Path,
-					Provider: result.Provider,
+				payload := NewPayload{
+					SchemaVersion: SchemaVersion,
+					Project:       result.Project,
+					Branch:        result.Branch,
+					Path:          result.Path,
+					Provider:      result.Provider,
 				}
 				if switchTo {
 					payload.SessionID = sessionID

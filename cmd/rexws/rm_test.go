@@ -92,13 +92,17 @@ func TestRmForceJSONRequiresYesAndKeepsStdoutPure(t *testing.T) {
 		t.Fatalf("rm --force --json --yes: %v\nstderr: %s", err, stderr)
 	}
 	var result struct {
-		Path string `json:"path"`
-		Loss *struct {
+		SchemaVersion int    `json:"schema_version"`
+		Path          string `json:"path"`
+		Loss          *struct {
 			DirtyFiles []string `json:"dirty_files"`
 		} `json:"loss"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Fatalf("parse JSON %q: %v", stdout, err)
+	}
+	if result.SchemaVersion != SchemaVersion {
+		t.Errorf("schema_version = %d, want %d", result.SchemaVersion, SchemaVersion)
 	}
 	if result.Path != targetPath || result.Loss == nil || len(result.Loss.DirtyFiles) != 1 {
 		t.Errorf("result = %#v", result)
@@ -205,6 +209,7 @@ func TestRmDeleteBranchMerged(t *testing.T) {
 		t.Fatalf("rm --delete-branch: %v\nstderr: %s", err, stderr)
 	}
 	var result struct {
+		SchemaVersion    int    `json:"schema_version"`
 		DeletedBranch    string `json:"deleted_branch"`
 		RetainedBranches []struct {
 			Branch string `json:"branch"`
@@ -212,6 +217,9 @@ func TestRmDeleteBranchMerged(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Fatalf("parse JSON %q: %v", stdout, err)
+	}
+	if result.SchemaVersion != SchemaVersion {
+		t.Errorf("schema_version = %d, want %d", result.SchemaVersion, SchemaVersion)
 	}
 	if result.DeletedBranch != "feat/cli-merged" || len(result.RetainedBranches) != 0 {
 		t.Errorf("result = %#v", result)
@@ -233,6 +241,7 @@ func TestRmReportsRetainedUnmergedBranch(t *testing.T) {
 		t.Fatalf("rm: %v\nstderr: %s", err, stderr)
 	}
 	var result struct {
+		SchemaVersion    int `json:"schema_version"`
 		RetainedBranches []struct {
 			Branch  string `json:"branch"`
 			State   string `json:"state"`
@@ -244,6 +253,9 @@ func TestRmReportsRetainedUnmergedBranch(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Fatalf("parse JSON %q: %v", stdout, err)
+	}
+	if result.SchemaVersion != SchemaVersion {
+		t.Errorf("schema_version = %d, want %d", result.SchemaVersion, SchemaVersion)
 	}
 	if len(result.RetainedBranches) != 1 {
 		t.Fatalf("result = %#v", result)
@@ -319,7 +331,8 @@ func TestRmForceDetachedListsUniqueCommits(t *testing.T) {
 		t.Fatalf("rm detached --force: %v\nstderr: %s", err, stderr)
 	}
 	var result struct {
-		Loss struct {
+		SchemaVersion int `json:"schema_version"`
+		Loss          struct {
 			Detached        bool `json:"detached"`
 			DetachedCommits []struct {
 				Subject string `json:"subject"`
@@ -329,11 +342,67 @@ func TestRmForceDetachedListsUniqueCommits(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Fatalf("parse JSON %q: %v", stdout, err)
 	}
+	if result.SchemaVersion != SchemaVersion {
+		t.Errorf("schema_version = %d, want %d", result.SchemaVersion, SchemaVersion)
+	}
 	if !result.Loss.Detached || len(result.Loss.DetachedCommits) != 1 || result.Loss.DetachedCommits[0].Subject != "detached work" {
 		t.Errorf("loss = %#v", result.Loss)
 	}
 	if !strings.Contains(stderr, "detached HEAD") || !strings.Contains(stderr, "detached work") {
 		t.Errorf("stderr = %q", stderr)
+	}
+}
+
+func TestRmProviderRemovesThenFailsEmitsJSON(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		extra []string
+	}{
+		{"retained", nil},
+		{"delete-branch", []string{"--delete-branch"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := testRepo(t)
+			root := filepath.Join(t.TempDir(), "worktrees")
+			testConfig(t, repo, root, "")
+			target := filepath.Join(root, "feat", "provider-fail")
+			gitRun(t, repo, "worktree", "add", "-q", "-b", "feat/provider-fail", target)
+			targetPath := mustCanonical(t, target)
+
+			cfg, err := config.Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := fmt.Sprintf("git -C %q worktree remove %q && exit 1", repo, targetPath)
+			cfg.Providers["fake"] = config.Provider{Remove: []string{"sh", "-c", script}}
+			cfg.Projects[0].Provider = "fake"
+			if err := cfg.Save(); err != nil {
+				t.Fatal(err)
+			}
+			rmFakeRex(t)
+
+			args := append([]string{"rm", targetPath, "--json"}, tt.extra...)
+			stdout, stderr, err := runCLI(t, args...)
+			if err == nil {
+				t.Fatal("expected the provider failure")
+			}
+			var result RmPayload
+			if jsonErr := json.Unmarshal([]byte(stdout), &result); jsonErr != nil {
+				t.Fatalf("stdout was not a JSON document after the provider failure: %q\n%v\nstderr: %s", stdout, jsonErr, stderr)
+			}
+			if result.SchemaVersion != SchemaVersion || result.Path != targetPath || result.Provider != "fake" || result.Error == "" {
+				t.Errorf("result = %#v, want schema_version, path, provider, and error", result)
+			}
+			if len(result.RetainedBranches) != 1 || result.RetainedBranches[0].Branch != "feat/provider-fail" {
+				t.Errorf("retained_branches = %#v, want the branch that still exists", result.RetainedBranches)
+			}
+			if tt.name == "retained" && result.Retained == nil {
+				t.Error("retained is absent, want the plan-time retained report")
+			}
+			if tt.name == "delete-branch" && result.Retained != nil {
+				t.Error("retained is present, want it absent with --delete-branch")
+			}
+		})
 	}
 }
 
@@ -367,6 +436,7 @@ func TestRmPartialDeleteBranchFailureEmitsJSON(t *testing.T) {
 		t.Fatal("expected the branch proof to fail after the provider moved the default branch")
 	}
 	var result struct {
+		SchemaVersion    int    `json:"schema_version"`
 		Path             string `json:"path"`
 		Error            string `json:"error"`
 		RetainedBranches []struct {
@@ -376,6 +446,9 @@ func TestRmPartialDeleteBranchFailureEmitsJSON(t *testing.T) {
 	}
 	if jsonErr := json.Unmarshal([]byte(stdout), &result); jsonErr != nil {
 		t.Fatalf("stdout was not a JSON document on partial failure: %q\n%v\nstderr: %s", stdout, jsonErr, stderr)
+	}
+	if result.SchemaVersion != SchemaVersion {
+		t.Errorf("schema_version = %d, want %d", result.SchemaVersion, SchemaVersion)
 	}
 	if result.Path != targetPath || result.Error == "" {
 		t.Errorf("result = %#v", result)

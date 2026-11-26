@@ -137,6 +137,7 @@ func TestNewSwitchCreatesSession(t *testing.T) {
 		t.Fatalf("new --switch: %v\nstderr: %s", err, stderr)
 	}
 	var result struct {
+		SchemaVersion  int    `json:"schema_version"`
 		Project        string `json:"project"`
 		Branch         string `json:"branch"`
 		Path           string `json:"path"`
@@ -146,6 +147,9 @@ func TestNewSwitchCreatesSession(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Fatalf("parse JSON %q: %v", stdout, err)
+	}
+	if result.SchemaVersion != SchemaVersion {
+		t.Errorf("schema_version = %d, want %d", result.SchemaVersion, SchemaVersion)
 	}
 	wantPath, err := pathutil.Canonical(filepath.Join(root, "feat", "switch"))
 	if err != nil {
@@ -184,11 +188,15 @@ func TestNewSwitchSelectsExistingSession(t *testing.T) {
 		t.Fatalf("new --switch: %v\nstderr: %s", err, stderr)
 	}
 	var result struct {
+		SchemaVersion  int    `json:"schema_version"`
 		SessionID      string `json:"session_id"`
 		SessionCreated *bool  `json:"session_created"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Fatalf("parse JSON %q: %v", stdout, err)
+	}
+	if result.SchemaVersion != SchemaVersion {
+		t.Errorf("schema_version = %d, want %d", result.SchemaVersion, SchemaVersion)
 	}
 	if result.SessionID != "session:existing" || result.SessionCreated == nil || *result.SessionCreated {
 		t.Errorf("session fields = (%q, %v)", result.SessionID, result.SessionCreated)
@@ -306,13 +314,17 @@ func TestNewCreatesWorktree(t *testing.T) {
 		t.Fatalf("new: %v\nstderr: %s", err, stderr)
 	}
 	var result struct {
-		Project  string `json:"project"`
-		Branch   string `json:"branch"`
-		Path     string `json:"path"`
-		Provider string `json:"provider"`
+		SchemaVersion int    `json:"schema_version"`
+		Project       string `json:"project"`
+		Branch        string `json:"branch"`
+		Path          string `json:"path"`
+		Provider      string `json:"provider"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Fatalf("parse JSON %q: %v", stdout, err)
+	}
+	if result.SchemaVersion != SchemaVersion {
+		t.Errorf("schema_version = %d, want %d", result.SchemaVersion, SchemaVersion)
 	}
 	want, err := pathutil.Canonical(filepath.Join(root, "feat", "auth"))
 	if err != nil {
@@ -378,10 +390,14 @@ esac
 		t.Fatalf("rm: %v\nstderr: %s", err, stderr)
 	}
 	var result struct {
+		SchemaVersion   int    `json:"schema_version"`
 		ClosedSessionID string `json:"closed_session_id"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Fatalf("parse JSON %q: %v", stdout, err)
+	}
+	if result.SchemaVersion != SchemaVersion {
+		t.Errorf("schema_version = %d, want %d", result.SchemaVersion, SchemaVersion)
 	}
 	if result.ClosedSessionID != "session:fake" {
 		t.Errorf("closed session = %q", result.ClosedSessionID)

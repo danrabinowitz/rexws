@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "workstreams": [
+    {
+      "project": "repo",
+      "branch": "feat/auth",
+      "path": "/Users/you/code/worktrees/repo/feat-auth",
+      "session_name": "repo/feat/auth",
+      "workflow_status": "in_progress",
+      "workflow_status_label": "In Progress",
+      "note": "Waiting on schema migration",
+      "rex_session_id": "session:auth",
+      "agent_state": "blocked",
+      "agent_detail": "permission_prompt",
+      "agents": [
+        {
+          "block_id": "block:1",
+          "block_label": "agent",
+          "window_id": "window:1",
+          "window_label": "main",
+          "app": "codex",
+          "effective_app": "codex",
+          "state": "blocked",
+          "detail": "permission_prompt",
+          "msg": "approve the migration",
+          "title": "rexws",
+          "updated_at": "2026-11-25T22:00:00Z"
+        }
+      ],
+      "windows": [
+        {
+          "window_id": "window:1",
+          "label": "main",
+          "active": true,
+          "focused_block_id": "block:1",
+          "block_ids": ["block:1"]
+        }
+      ]
+    }
+  ]
+}

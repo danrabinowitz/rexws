@@ -77,7 +77,7 @@ func TestCleanupCLIPreviewIsReportOnly(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
 		t.Fatalf("parse JSON %q: %v", stdout, err)
 	}
-	if report.SchemaVersion != 1 || report.Applied {
+	if report.SchemaVersion != SchemaVersion || report.Applied {
 		t.Errorf("report = %#v", report)
 	}
 	var found bool

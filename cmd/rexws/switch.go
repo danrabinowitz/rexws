@@ -42,13 +42,14 @@ func newSwitchCmd() *cobra.Command {
 				return err
 			}
 			if asJSON {
-				return encodeJSON(cmd, struct {
-					SessionName string `json:"session_name"`
-					SessionID   string `json:"session_id"`
-					WindowID    string `json:"window_id,omitempty"`
-					WindowLabel string `json:"window_label,omitempty"`
-					Created     bool   `json:"created"`
-				}{candidate.SessionName, result.SessionID, result.WindowID, result.WindowLabel, result.Created})
+				return encodeJSON(cmd, SwitchPayload{
+					SchemaVersion: SchemaVersion,
+					SessionName:   candidate.SessionName,
+					SessionID:     result.SessionID,
+					WindowID:      result.WindowID,
+					WindowLabel:   result.WindowLabel,
+					Created:       result.Created,
+				})
 			}
 			if result.Created {
 				fmt.Fprintf(cmd.OutOrStdout(), "Created Rex session %s and switched to it\n", result.SessionID)

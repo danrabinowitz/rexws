@@ -16,6 +16,12 @@ const (
 	Stopped State = "stopped" // no Rex session
 )
 
+// Values is the canonical value set for the JSON contract. The schema manifest
+// and its tests consume it.
+func Values() []State {
+	return []State{Blocked, Error, Working, Unknown, Done, Idle, Stopped}
+}
+
 // Severity orders states for aggregation and display, most urgent first.
 func (s State) Severity() int {
 	switch s {

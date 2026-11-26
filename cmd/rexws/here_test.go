@@ -42,9 +42,9 @@ func newHereFixture(t *testing.T) hereFixture {
 	return hereFixture{repo: repo, root: root, target: target, targetPath: mustCanonical(t, target)}
 }
 
-func decodeHere(t *testing.T, stdout string) hereJSON {
+func decodeHere(t *testing.T, stdout string) HerePayload {
 	t.Helper()
-	var got hereJSON
+	var got HerePayload
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("parse JSON %q: %v", stdout, err)
 	}
@@ -62,7 +62,8 @@ func TestHereResolvesWorktreeRootAndSubdirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := hereJSON{
+	want := HerePayload{
+		SchemaVersion:       SchemaVersion,
 		Project:             "repo",
 		Branch:              "feat/auth",
 		Path:                f.targetPath,
@@ -316,10 +317,14 @@ func TestHereSelectorRoundTripsThroughOtherCommands(t *testing.T) {
 		t.Fatalf("status %q: %v\nstderr: %s", got.Selector, err, stderr)
 	}
 	var change struct {
-		Path string `json:"path"`
+		SchemaVersion int    `json:"schema_version"`
+		Path          string `json:"path"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &change); err != nil {
 		t.Fatalf("parse status JSON %q: %v", stdout, err)
+	}
+	if change.SchemaVersion != SchemaVersion {
+		t.Errorf("status schema_version = %d, want %d", change.SchemaVersion, SchemaVersion)
 	}
 	if change.Path != f.targetPath {
 		t.Errorf("status path = %q, want %q", change.Path, f.targetPath)
@@ -330,11 +335,15 @@ func TestHereSelectorRoundTripsThroughOtherCommands(t *testing.T) {
 		t.Fatalf("switch %q: %v\nstderr: %s", got.Selector, err, stderr)
 	}
 	var switched struct {
-		SessionName string `json:"session_name"`
-		SessionID   string `json:"session_id"`
+		SchemaVersion int    `json:"schema_version"`
+		SessionName   string `json:"session_name"`
+		SessionID     string `json:"session_id"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &switched); err != nil {
 		t.Fatalf("parse switch JSON %q: %v", stdout, err)
+	}
+	if switched.SchemaVersion != SchemaVersion {
+		t.Errorf("switch schema_version = %d, want %d", switched.SchemaVersion, SchemaVersion)
 	}
 	if switched.SessionName != "repo/feat/auth" || switched.SessionID != "session:auth" {
 		t.Errorf("switch = %#v", switched)
@@ -436,10 +445,14 @@ func TestHereDetachedWorktreeUsesPathForm(t *testing.T) {
 		t.Fatalf("status %q: %v\nstderr: %s", got.Selector, err, stderr)
 	}
 	var change struct {
-		Path string `json:"path"`
+		SchemaVersion int    `json:"schema_version"`
+		Path          string `json:"path"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &change); err != nil {
 		t.Fatalf("parse status JSON %q: %v", stdout, err)
+	}
+	if change.SchemaVersion != SchemaVersion {
+		t.Errorf("status schema_version = %d, want %d", change.SchemaVersion, SchemaVersion)
 	}
 	if change.Path != targetPath {
 		t.Errorf("status path = %q, want %q", change.Path, targetPath)
