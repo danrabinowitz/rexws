@@ -90,3 +90,12 @@ concrete use case appears, not just because they are possible.
 - **Toggling bare/prunable worktree inclusion.** Niche and easy to get wrong.
 - **Multiple sessions per workstream.** The model assumes one session per
   worktree.
+- **Automatic Rex session reordering when an agent becomes ready.** `rex session
+  move` can put a session at the top, and the transition data already exists via
+  `program_status_changed`. But session order is server-wide and shared by every
+  Rex client, so automatic moves can override manual ordering, affect other
+  apps, and thrash as agents move between working and idle. It needs an opt-in,
+  a debounce, a clear “ready” definition (blocked/error or a finished turn, not
+  every idle), and a single owner. Prefer a rexws-local “needs attention” sort
+  or group in the TUI first; only move Rex sessions if the Rex sidebar itself
+  must reorder.
