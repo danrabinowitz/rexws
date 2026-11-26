@@ -147,7 +147,7 @@ and it currently requires Rex to be reachable.
 | `rexws switch <selector> [--window ...] [--client ...] [--json]` | Show the workstream's Rex session, creating it if needed; optionally select a window. |
 | `rexws status <selector> <stage> [--json]` | Set a workstream's workflow status, by ID or label. |
 | `rexws rm <selector> [--json]` | Close the session, remove the worktree, clear its metadata. |
-| `rexws cleanup [--project <name>] [--json] [--apply] [--force]` | Report every worktree and branch with a removal reason; remove only the provably safe set. |
+| `rexws cleanup [--project <name>] [--json] [--apply] [--force] [--fix [--yes]]` | Report every worktree, branch, and orphan with a reason; remove only the provably safe set and prune only provably stale `state.json` entries. |
 
 ### Selecting a workstream
 
@@ -312,22 +312,139 @@ Safety rules:
   over batching.
 - Worktree removal also clears that path's `state.json` entry. Branch-only
   deletions have no state.
+- `cleanup --fix` changes only `state.json` and is covered under
+  [Orphan triage](#orphan-triage).
+
+#### Orphan triage
+
+The same report names every inconsistency between Rex sessions, `state.json`,
+and Git worktrees. Reporting is read-only; only `--fix` changes anything.
+
+| Kind | Meaning | `--fix` |
+| --- | --- | --- |
+| `unmatched-session` | A live Rex session's label matches no worktree in the registered projects. | Reported only. rexws never adopts, renames, or closes sessions. |
+| `stale-state` | A `state.json` key's path is not a current Git worktree. | Pruned only when the path is absent and provably names no worktree. |
+| `unregistered-worktree` | A worktree inside a registered project's checkout but outside that project's `worktree_root`. | Reported only. rexws does not register it. |
+| `session-label-conflict` | More than one live session shares a label, or one label matches more than one worktree, such as two detached worktrees at the same commit. | Reported only. rexws never closes or renames sessions. |
+
+Detection rules:
+
+- A path is a current Git worktree when a registered project's
+  `git worktree list --porcelain` reports it, including a prunable record, or
+  when the path exists and is the top level of a Git worktree. The second rule
+  keeps state for a worktree of an unregistered repository; rexws does not
+  treat a path as stale merely because the project is not registered.
+- A `stale-state` entry is fixable only when its key is absolute, the path does
+  not exist, and no re-listed project has a worktree there. A path that still
+  exists but is not a worktree is reported and retained, as are prunable
+  worktrees, which `cleanup --apply` owns.
+- Fixability is computed over every registered project's worktree list, which
+  is the same set `--fix` re-lists. If any registered project cannot be listed,
+  stale entries are not checked at all, so a preview never advertises a fix
+  that would refuse. A project whose default branch cannot be resolved still
+  contributes its already-listed worktrees to session matching and
+  unregistered-worktree reports.
+- Session labels are `<project>/<branch>`; detached worktrees use the
+  abbreviated HEAD commit. Branches may contain `/`. A session for an
+  unregistered worktree still matches, so it is not reported as unmatched.
+  Only labels whose first segment names a registered project are considered
+  rexws-managed; a hand-named or unknown-project session is left alone. With
+  no projects registered, session triage is skipped with a warning.
+- A project with no `worktree_root` is skipped for `unregistered-worktree`,
+  because there is no configured convention to violate. Set one to make
+  out-of-root worktrees visible.
+- `--project` narrows session items by label prefix, unregistered worktrees to
+  that project, and state entries to paths under its checkout or
+  `worktree_root`, even when only one project is registered. The state proof
+  still reads every registered project so preview and fix agree.
+
+`--fix` confirmation:
+
+- `cleanup --fix` lists the candidates on stderr and asks on a terminal.
+  Anything other than `y` or `yes` changes nothing and returns success unless
+  the report itself has errors.
+- A non-interactive run, and any `--json` run with candidates, must pass
+  `--yes`; without it, the report is still printed but the command exits
+  nonzero and changes no state. With no candidates there is nothing to confirm:
+  `--fix` is an authorized no-op that validates `state.json` and reports
+  `"fixed": true`.
+- `--fix` cannot be combined with `--apply` or `--force`. It never kills or
+  renames a Rex session, registers a project, adopts a session, or touches a
+  worktree or branch.
+- A `state.json` read failure is a warning in a preview and an error for
+  `--fix`; a preview therefore still exits zero when the rest of the report is
+  clean, while JSON stays a single parseable document in both cases.
+- Before saving, fix re-lists every registered project, reloads `state.json`,
+  and re-proves each target. If a path reappeared or became a worktree, nothing
+  is pruned and that entry is reported `failed`. If a project cannot be
+  re-read, the fix refuses before the per-item loop, so results stay empty.
 
 `--json` emits a `schema_version: 1` document. The version is provisional until
 `S2 · Frozen JSON contract`; the shape is fixed because every item carries
 every key. Projects are sorted by name and items by branch, kind, and path, so
-two reports of the same repositories are byte-identical. Every item carries
-`project`, `kind` (`worktree` or `branch`), `path`, `branch`, `head`,
-`classification`, `branch_state`, `safe`, `removable`, `requires_force`,
-`dirty`, `locked`, `detached`, `active_session`, `session_id`, `action`,
-`result`, `detail`, `loss`, and `error`. Empty values are `""`, `false`, or
-`null`; keys are never omitted. `loss` is `null` when nothing would be lost,
-or an object whose `dirty_files` and `commits` are always arrays.
-`totals.by_classification` always includes every classification key, including
-zero counts. `action` is what apply would do; `result` is empty in a preview
-and `kept`, `removed`, or `failed` after apply; `error` is empty unless an item
-was kept or failed during apply. This is the candidate shape for the frozen
-contract; the other commands' JSON remains unfrozen.
+two reports of the same repositories are byte-identical. Every worktree or
+branch item carries `project`, `kind` (`worktree` or `branch`), `path`,
+`branch`, `head`, `classification`, `branch_state`, `safe`, `removable`,
+`requires_force`, `dirty`, `locked`, `detached`, `active_session`,
+`session_id`, `action`, `result`, `detail`, `loss`, and `error`. Empty values
+are `""`, `false`, or `null`; keys are never omitted. `loss` is `null` when
+nothing would be lost, or an object whose `dirty_files` and `commits` are
+always arrays. `totals.by_classification` always includes every classification
+key, including zero counts. `action` is what apply would do; `result` is empty
+in a preview and `kept`, `removed`, or `failed` after apply; `error` is empty
+unless an item was kept or failed during apply.
+
+The orphan section is additive and does not change `projects` or `totals`:
+
+```json
+{
+  "orphans": {
+    "fixed": false,
+    "complete": true,
+    "items": [
+      {
+        "kind": "stale-state",
+        "project": "repo",
+        "label": "",
+        "path": "/absolute/path/to/worktrees/repo/feat-gone",
+        "session_ids": [],
+        "detail": "state.json entry points at a path that no longer exists and is not a current Git worktree",
+        "fixable": true,
+        "result": "",
+        "error": ""
+      }
+    ],
+    "totals": {
+      "scanned": 1,
+      "fixable": 1,
+      "removed": 0,
+      "failed": 0,
+      "kept": 0,
+      "by_kind": {
+        "unmatched-session": 0,
+        "stale-state": 1,
+        "unregistered-worktree": 0,
+        "session-label-conflict": 0
+      }
+    }
+  }
+}
+```
+
+`orphans.items` is sorted by kind, project, label, path, and session IDs.
+`session_ids` is always an array. `fixed` means an authorized fix pass ran: it
+is `false` in a preview, or when the fix was refused or failed before running,
+and `true` after a fix pass, including a zero-candidate no-op. `complete` means
+the stale-state proof covered every registered project, loaded `state.json`,
+and checked every entry in scope; it is `false` for a preview or fix where no
+projects are registered, a project’s worktrees could not be listed, `state.json`
+could not be loaded, or an entry could not be checked. Scripts must treat
+`"complete": false` as “stale state was not examined”, not as clean. `result`
+stays empty in a preview or a fix that refused before the per-item loop; after
+an authorized fix pass every item is `kept`, `removed`, or `failed`, so the
+report names exactly what was pruned and what was retained.
+`orphans.totals.by_kind` always includes all four kinds. This is the candidate
+shape for the frozen contract; the other commands' JSON remains unfrozen.
 
 Cleanup is deliberately not scheduled and does not kill Rex sessions. It also
 never deletes a branch it cannot prove merged or patch-equivalent without
@@ -425,6 +542,8 @@ a silent remap.
 
 Entries are keyed by canonical worktree path. A workstream with no entry gets
 the configured default status. `note` is stored but has no editing command yet.
+`rexws cleanup` reports entries whose path is no longer a current Git worktree;
+`cleanup --fix` prunes only the provably stale ones after confirmation.
 
 ---
 
@@ -543,6 +662,10 @@ may change without migration support.
   the current directory.
 - `cleanup`: a preview-first, cross-project classification of every worktree
   and branch, with a safe `--apply` set and a force path that names its loss.
+- Orphan triage in `cleanup`: unmatched Rex sessions, stale `state.json`
+  entries, worktrees outside their project's `worktree_root`, and duplicate or
+  ambiguous session labels; `--fix` prunes only provably stale state after
+  confirmation.
 - The interactive TUI (`rexws` or `rexws tui`): workflow-status groups, an
   expandable workstream → window hierarchy, substring search, status switching,
   and live Rex updates.

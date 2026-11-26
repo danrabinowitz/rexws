@@ -176,3 +176,42 @@ func TestIsDirty(t *testing.T) {
 		t.Fatalf("dirty worktree: dirty=%v err=%v", dirty, err)
 	}
 }
+
+func TestTopLevel(t *testing.T) {
+	repo := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	run("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-q", "-m", "init")
+	sub := filepath.Join(repo, "sub", "deeper")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	top, err := TopLevel(context.Background(), sub)
+	if err != nil {
+		t.Fatalf("TopLevel: %v", err)
+	}
+	gotTop, err := filepath.EvalSymlinks(top)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTop, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotTop != wantTop {
+		t.Errorf("TopLevel from a subdirectory = %q, want %q", gotTop, wantTop)
+	}
+
+	outside := t.TempDir()
+	if _, err := TopLevel(context.Background(), outside); err == nil ||
+		!strings.Contains(err.Error(), "not a git repository") {
+		t.Errorf("TopLevel outside a worktree err = %v", err)
+	}
+}

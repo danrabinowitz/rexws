@@ -11,7 +11,6 @@ import (
 
 	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/git"
-	"github.com/danrabinowitz/rexws/internal/rex"
 )
 
 // CleanupClassification is the primary reason a worktree or branch was
@@ -65,11 +64,13 @@ const (
 )
 
 // CleanupOptions selects what to scan and whether to mutate. The zero value is
-// the report-only default.
+// the report-only default. Fix makes a state.json read failure loud instead of
+// a warning; PlanCleanup itself never mutates.
 type CleanupOptions struct {
 	Project string
 	Apply   bool
 	Force   bool
+	Fix     bool
 }
 
 // CleanupLoss names exactly what a forced removal discards. DirtyFiles are
@@ -135,24 +136,31 @@ type CleanupTotals struct {
 }
 
 // CleanupReport is the stable JSON document behind `rexws cleanup --json`.
-// SchemaVersion is 1 for this shape. Projects and Items are sorted, so two
-// scans of the same repository produce identical JSON.
+// SchemaVersion is 1 for this shape. Projects, Items, and Orphans.Items are
+// sorted, so two scans of the same repository produce identical JSON. The
+// Orphans section is an additive extension; it does not change Projects or
+// Totals.
 type CleanupReport struct {
 	SchemaVersion int              `json:"schema_version"`
 	Applied       bool             `json:"applied"`
 	Force         bool             `json:"force"`
 	Projects      []CleanupProject `json:"projects"`
+	Orphans       CleanupOrphans   `json:"orphans"`
 	Totals        CleanupTotals    `json:"totals"`
 	Warnings      []string         `json:"warnings"`
 	Errors        []string         `json:"errors"`
 }
 
-// Err returns the project errors and any failed apply actions. A preview with
-// unreadable projects still prints its report, then exits nonzero through this.
+// Err returns the project errors, any failed apply actions, and any failed
+// orphan fixes. A preview with unreadable projects still prints its report,
+// then exits nonzero through this.
 func (r CleanupReport) Err() error {
 	parts := append([]string{}, r.Errors...)
 	if r.Totals.Failed > 0 {
 		parts = append(parts, fmt.Sprintf("%d cleanup action(s) failed", r.Totals.Failed))
+	}
+	if r.Orphans.Totals.Failed > 0 {
+		parts = append(parts, fmt.Sprintf("%d orphan fix action(s) failed", r.Orphans.Totals.Failed))
 	}
 	if len(parts) == 0 {
 		return nil
@@ -179,11 +187,16 @@ func PlanCleanup(ctx context.Context, cfg config.Config, opts CleanupOptions) (C
 		SchemaVersion: 1,
 		Force:         opts.Force,
 		Projects:      make([]CleanupProject, 0, len(projects)),
+		Orphans:       emptyCleanupOrphans(),
 		Warnings:      []string{},
 		Errors:        []string{},
 	}
 
-	active, rexErr := activeSessions(ctx, cfg)
+	sessions, rexErr := listCleanupSessions(ctx, cfg)
+	var active map[string][]string
+	if rexErr == nil {
+		active = sessionsByLabel(sessions)
+	}
 	if rexErr != nil {
 		report.Warnings = append(report.Warnings, fmt.Sprintf("Rex unavailable: %v; active sessions could not be checked", rexErr))
 		if opts.Apply {
@@ -191,14 +204,24 @@ func PlanCleanup(ctx context.Context, cfg config.Config, opts CleanupOptions) (C
 		}
 	}
 
+	scans := make([]cleanupOrphanProject, 0, len(projects))
 	for _, project := range projects {
-		planned, err := planCleanupProject(ctx, project, opts, active)
+		planned, worktrees, listed, err := planCleanupProject(ctx, project, opts, active)
 		if err != nil {
 			report.Errors = append(report.Errors, fmt.Sprintf("project %s: %v", project.Name, err))
+			scans = append(scans, cleanupOrphanProject{Project: project, Worktrees: worktrees, Listed: listed, Err: err})
 			continue
 		}
 		report.Projects = append(report.Projects, planned)
+		scans = append(scans, cleanupOrphanProject{Project: project, Worktrees: worktrees, Listed: listed})
 	}
+
+	proofScans := cleanupOrphanProofScans(ctx, cfg, scans)
+	orphans, orphanWarnings, orphanErrors := scanCleanupOrphans(
+		ctx, cfg, scans, proofScans, sessions, rexErr == nil, opts.Project != "", opts.Fix)
+	report.Orphans = orphans
+	report.Warnings = append(report.Warnings, orphanWarnings...)
+	report.Errors = append(report.Errors, orphanErrors...)
 
 	recountCleanup(&report, true)
 	return report, nil
@@ -517,18 +540,18 @@ func sameCommits(left, right []git.Commit) bool {
 	return true
 }
 
-func planCleanupProject(ctx context.Context, project config.Project, opts CleanupOptions, active map[string][]string) (CleanupProject, error) {
+func planCleanupProject(ctx context.Context, project config.Project, opts CleanupOptions, active map[string][]string) (CleanupProject, []git.Worktree, bool, error) {
 	worktrees, err := git.ListWorktrees(ctx, project.Path)
 	if err != nil {
-		return CleanupProject{}, err
+		return CleanupProject{}, nil, false, err
 	}
 	base, err := git.DefaultBranch(ctx, project.Path)
 	if err != nil {
-		return CleanupProject{}, err
+		return CleanupProject{}, worktrees, true, err
 	}
 	branches, err := git.ListBranches(ctx, project.Path)
 	if err != nil {
-		return CleanupProject{}, err
+		return CleanupProject{}, worktrees, true, err
 	}
 
 	planned := CleanupProject{
@@ -559,7 +582,7 @@ func planCleanupProject(ctx context.Context, project config.Project, opts Cleanu
 		planned.Items = append(planned.Items, planCleanupBranch(ctx, project, branch, base, active, opts))
 	}
 	sortCleanupItems(planned.Items)
-	return planned, nil
+	return planned, worktrees, true, nil
 }
 
 func planCleanupWorktree(ctx context.Context, project config.Project, worktree git.Worktree, mainPath, base string, active map[string][]string, opts CleanupOptions) CleanupItem {
@@ -1003,15 +1026,11 @@ func recountCleanup(report *CleanupReport, preview bool) {
 }
 
 func activeSessions(ctx context.Context, cfg config.Config) (map[string][]string, error) {
-	sessions, err := rex.New(cfg.RexBinary()).ListSessions(ctx)
+	sessions, err := listCleanupSessions(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
-	byLabel := make(map[string][]string, len(sessions))
-	for _, session := range sessions {
-		byLabel[session.Label] = append(byLabel[session.Label], session.ID)
-	}
-	return byLabel, nil
+	return sessionsByLabel(sessions), nil
 }
 
 func clearWorktreeState(cfg config.Config, paths []string) error {

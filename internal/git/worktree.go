@@ -108,6 +108,17 @@ func ProjectRoot(ctx context.Context, path string) (string, error) {
 	return worktrees[0].Path, nil
 }
 
+// TopLevel returns the absolute path of the worktree containing dir. It fails
+// when dir is not inside a Git worktree, which is how state reconciliation
+// proves a path is not a worktree.
+func TopLevel(ctx context.Context, dir string) (string, error) {
+	out, err := runGit(ctx, dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // ShortHead returns the abbreviated HEAD commit, used to name detached
 // workstreams.
 func (w Worktree) ShortHead() string {
