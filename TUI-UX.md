@@ -565,14 +565,23 @@ if it is pure and tested.
 - `s` opens the status selector for the selected row's workstream. Applying a
   status refreshes; the cursor follows the workstream's `Path`, even if it moves
   to another group.
-- `d` runs these pre-checks **before** showing confirmation:
+- `d` preflights with force enabled, then shows a confirmation. Pre-checks:
   1. The main worktree cannot be removed.
-  2. A dirty worktree cannot be removed; show Git's reason.
+  2. A dirty or detached worktree is allowed. The confirmation lists the exact
+     Loss — every dirty, staged, untracked, or ignored path and every commit
+     unique to a detached HEAD, or an assessment that could not be proven — so
+     confirming the dialog is the consent for that loss. There is no separate
+     force key. The dialog shows the same Loss, Retained, and Actions sections
+     as the CLI.
   3. Rex must be available to close a live session; if not, explain and do not
      open the dialog.
   4. The project/provider must resolve.
-  The confirmation names the workstream and warns that its Rex session and
-  windows will close. On success or failure, refresh and apply the cursor rule.
+  The TUI always retains the branch; branch deletion is CLI-only
+  (`rexws rm --delete-branch`). The confirmation names the workstream and warns
+  that its Rex session and windows will close. On success or failure, refresh
+  and apply the cursor rule. This is intentionally different from plain
+  `rexws rm`, which refuses a dirty or detached worktree unless `--force` is
+  passed.
 - `n` opens the new-worktree form: project, branch, provider (default from the
   project), and target-path preview. On submit, run the provider via
   `tea.ExecProcess`. After return, refresh, verify exactly one worktree exists
@@ -988,8 +997,16 @@ Completed with the Milestone 4 docs pass:
 - `README.md` documents the TUI and the `rexws` / `rexws tui` launch paths.
 - This document is linked from `SPEC.md` and `ROADMAP.md`.
 
-Remaining drift outside that pass: `SPEC.md` §2 still describes workflow
-statuses as a fixed enum rather than the configurable `statuses` list.
+Completed with the SPEC drift pass (issue #14):
+
+- `SPEC.md` §1–§7 now match shipped behavior: JSON-only config, configurable
+  statuses with `rex_bin` and `rex_client`, the full template-variable and
+  `Workstream` models, the JSON event-stream adapter, configurable status
+  stages, the shipped TUI actions including the cleanup screen, and the current
+  implementation state.
+- `README.md` and `ROADMAP.md` reflect the same shipped surface. The remaining
+  Docs candidates are `docs/rex-cli.md` and an automated docs-example check.
+- No known behavior drift remains in `SPEC.md`.
 
 ## 15. Out of scope
 

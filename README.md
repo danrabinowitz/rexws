@@ -215,7 +215,7 @@ proof refuses and keeps the worktree or branch.
 | Command | Purpose |
 | --- | --- |
 | `rexws` / `rexws tui` | Launch the interactive dashboard. |
-| `rexws list [--json] [--status <id>]` | List discovered workstreams with merged Rex and workflow state. |
+| `rexws list [--json] [--status <id-or-label>]...` | List discovered workstreams with merged Rex and workflow state. `--status` is repeatable or comma-separated. |
 | `rexws here [--dir <path>] [--json]` | Show the workstream containing the current directory (or `--dir`). |
 | `rexws project add <path> [--name ...] [--provider ...] [--worktree-root ...]` | Register a Git repository. |
 | `rexws new <project> <branch> [--json] [--switch] [--client ...]` | Create a worktree with the project's provider; with `--switch`, also create or select its Rex session. |
@@ -556,21 +556,25 @@ active item.
 ### TUI
 
 Run `rexws` with no arguments, or `rexws tui`, to open the interactive
-dashboard. It keeps the workflow-status groups from `list` and adds an accordion
-inside them: each workstream expands to its Rex windows. `Enter` confirms the
-highlighted row (switch to the session, or to the selected window). `Right`
-expands a parent; a second `Right` moves into its first child, and `Left`
-collapses or returns to the parent. `/` filters by case-insensitive substring
-across project, branch, workflow status, agent state, and windows while keeping
-parent context.
+dashboard. It groups workstreams by configured workflow status, with each
+group header showing its configured label, icon, and color, and adds an
+accordion inside them: each workstream expands to its Rex windows. `Enter`
+confirms the highlighted row (switch to the session, or to the selected
+window). `Right` expands a parent; a second `Right` moves into its first child,
+and `Left` collapses or returns to the parent. `/` filters by case-insensitive
+substring across project, branch, workflow status, agent state, and windows
+while keeping parent context.
 Live Rex streams update agent badges and window state as they change. Press `?`
-for the full key map and `s` to change a workstream's status. `d` opens the
-remove confirmation, which lists the same `LOSS`, `RETAINED`, and `ACTIONS` the
-CLI would print. After the provider removes the worktree, the dashboard
-notifies you of the retained branch and whether it is unmerged, and warns if a
-provider deregistered the worktree but left its directory.
+for the full key map and `s` to change a workstream's status. `c` opens the
+cleanup screen, which previews every worktree and branch grouped by risk and
+applies only the selection you review. `d` opens the remove confirmation, which
+shows the same Loss, Retained, and Actions sections the CLI would print. After
+the provider removes the worktree, the dashboard notifies you of the retained
+branch and whether it is unmerged, and warns if a provider deregistered the
+worktree but left its directory.
 
-See `TUI-UX.md` for the full UX design.
+See `TUI-UX.md` for the behavior source of truth and `TUI-DESIGN.md` for the
+visual system.
 
 ## JSON contract
 
@@ -810,9 +814,12 @@ may change without migration support.
   entries, worktrees outside their project's `worktree_root`, and duplicate or
   ambiguous session labels; `--fix` prunes only provably stale state after
   confirmation.
-- The interactive TUI (`rexws` or `rexws tui`): workflow-status groups, an
-  expandable workstream → window hierarchy, substring search, status switching,
-  and live Rex updates.
+- The interactive TUI (`rexws` or `rexws tui`): workflow-status groups with
+  configured labels, colors, and icons; an expandable workstream → window
+  hierarchy; substring search; status switching; live Rex updates; and the
+  cleanup screen with preview and bulk apply.
+- `rexws schema` and the frozen, versioned JSON contract; `docs/json-schema.md`
+  documents every field and `cleanup` reports orphans additively.
 
 **Planned:**
 

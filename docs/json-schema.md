@@ -408,6 +408,6 @@ Every item carries every key; empty values are `""`, `false`, or `null`.
 
 ## Out of scope
 
-This contract covers the commands above. `rexws events` and future satellites
-are not part of `schema_version: 1`; they are separate streams with their own
-shapes.
+This contract covers the commands above. A future public `rexws events` stream
+and future satellites are not part of `schema_version: 1`; they would be
+separate streams with their own shapes.

@@ -2,7 +2,7 @@
 
 Status: handoff brief for the incoming project manager / coordinator.
 Snapshot: 2026-11-26. Repository: `/Users/djr/code/src/danrabinowitz/rexws`
-on `main` at `389b3b2`, clean except the intentionally untracked `TODO.md`.
+on `main` at `f6e98b6`, clean except the intentionally untracked `TODO.md`.
 
 ## 1. Your role
 
@@ -24,7 +24,7 @@ refinement.
 ## 2. Read first
 
 - `README.md` — what rexws is, the mental model, install/usage, project status.
-- `SPEC.md` — product design (note the remaining drift in §8).
+- `SPEC.md` — product design (see §8 for known caveats).
 - `ROADMAP.md` — the sequence; `IDEAS.md` is an unranked idea bank, not a plan.
 - GitHub issues — the actionable tasks and agent briefs. Each issue carries its
   own context, scope, and acceptance criteria so it can be handed to an agent
@@ -61,32 +61,35 @@ refinement.
 
 ## 4. Current state
 
-Shipped on `main`:
+Shipped on `main` through `f6e98b6`:
 
-- Milestone 1: config/state, Git worktree discovery, `project add`, `status`,
-  `list`.
-- Milestone 2: Rex adapter, per-pane program status, event parsing, `switch`.
-- Milestone 3: template providers, `new`, `rm` with main/dirty/Rex pre-checks,
-  session close, state cleanup.
-- Window phase 1: `windows[]`, `switch --window`, duplicate-label handling.
-- Milestone 4: full TUI, `rexws` / `rexws tui`, live streams, hierarchical search,
-  `new --switch [--client]`.
-- Docs pass: README/SPEC §6/ROADMAP/TUI-UX now describe the shipped TUI.
+- Milestones 1–4: config/state, Git worktree discovery, `project add`, `status`,
+  and `list`; the Rex adapter with per-pane program status and event parsing;
+  template providers with `new` and safe `rm`; and the full TUI with live
+  streams, hierarchical search, status switching, and `new --switch [--client]`.
+- Contract and cleanup: the shared selector grammar (including the issue #17
+  hardening that keeps one unreadable worktree from breaking every selector),
+  `rexws here`; the frozen `schema_version: 1` contract and `rexws schema`;
+  preview-first `cleanup` with safe apply/force, orphan triage and `--fix`, and
+  the TUI cleanup view.
+- TUI design: the visual system and wide-terminal layout, plus configurable
+  per-status color and icon (issue #13).
+- Docs: README, SPEC, ROADMAP, TUI-UX, TUI-DESIGN, and `docs/json-schema.md`
+  describe the shipped surface.
+
+See `ROADMAP.md` Shipped for the issue-level list. Known caveats are in §8.
 
 Verification: `go test ./...`, `go test -race ./...`, `go vet ./...`, and
-`gofmt -l cmd internal` pass on `main`. The installed
-`~/.local/bin/rexws` has been rebuilt and includes the TUI and `new --switch`.
+`gofmt -l cmd internal` pass on `main`. Rebuild `~/.local/bin/rexws` from
+`main` to pick up newly shipped commands.
 
 Repository state at handoff:
 
-- `main` at `389b3b2`, 1 commit ahead of `origin/main`; not pushed.
-- Worktrees: only the primary `main` checkout. The old `m4-tui` and docs-agent
-  worktrees and branches were removed after their commits were merged into
-  `main`. Start new refinement worktrees from `main`.
+- `main` at `f6e98b6`.
+- Worktrees: the primary `main` checkout plus per-task worktrees under
+  `~/code/worktrees/rexws/`; use `git worktree list` for the live set.
 - `TODO.md` is intentionally untracked. Do not touch it.
-- Live Rex sessions observed after cleanup: `rexws`, `rexws-main`, `.ai/main`.
-  The `rexws` session is likely the coordinator's own; treat all as user-owned.
-  The orphaned `rexws/m4-tui` session has been closed.
+- Treat observed Rex sessions as user-owned; do not kill them.
 
 ## 5. Golden path and commands
 
@@ -195,20 +198,14 @@ Important details:
 Sources of truth: Git and Rex for existence/state; rexws only persists config
 and workflow metadata. No database/daemon/telemetry. macOS-first.
 
-## 8. Open work and remaining doc drift
+## 8. Open work and known caveats
 
-Remaining `SPEC.md` drift deliberately left for a later docs pass:
-
-- §2 shows a fixed status enum and a config example missing `rex_bin`,
-  `rex_client`, `statuses`, `default_status`.
-- §1 mentions YAML; implementation is JSON-only.
-- §3 lists only `RepoPath`, `Branch`, `TargetPath`, `WorktreePath`; `Project`,
-  `RepoName`, and `Slug` also exist.
-- §4 has stale OSC/events wording and still lists the unimplemented Session 0
-  hotkey.
-- §5 describes status stages as fixed; they are configurable.
-- `ROADMAP.md` Docs still lists README install/CLI/config/Rex material and
-  `docs/rex-cli.md`; much of the README now exists.
+The `SPEC.md` drift pass (issue #14) is complete: §1–§7 now match shipped
+behavior (JSON-only config; configurable statuses including `rex_bin`,
+`rex_client`, `statuses`, `default_status`, color, and icon; the full
+template-variable and `Workstream` models; the Rex event-stream adapter;
+configurable stages; and the shipped TUI). `ROADMAP.md` Docs lists
+`docs/rex-cli.md` and an automated docs-example check; README covers the rest.
 
 Known caveats:
 
@@ -218,15 +215,14 @@ Known caveats:
   unchanged cells; `r` completed and the active marker was verified live before.
 - Worktrunk is representable as a provider template but `wt` was not installed,
   so its flags are unverified.
-- No tagged release, CI, or push at handoff. Rex is a preview; there is no
-  version check.
+- No tagged release; CI runs on every push to `main` and on pull requests. Rex
+  is a preview; there is no version check.
 
-Deferred/future: fuzzy ranking, status colors/icons, agent formatter choice,
-Session 0 hotkey, session adoption/label templates, `project set`, provider
-timeouts, Rex version check, config schema version, normalized public event
-stream, selector grammar (see `IDEAS.md`). The new `tui-designer` agent type is
-available for TUI audits; `adversarial-reviewer` is useful before merging
-non-trivial changes.
+Deferred/future: fuzzy ranking, agent formatter choice, Session 0 hotkey,
+session adoption/label templates, `project set`, provider timeouts, Rex version
+check, config schema version, and a normalized public event stream (see
+`IDEAS.md`). The new `tui-designer` agent type is available for TUI audits;
+`adversarial-reviewer` is useful before merging non-trivial changes.
 
 ## 9. Coordination protocol
 
