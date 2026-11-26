@@ -13,17 +13,11 @@ concrete use case appears, not just because they are possible.
 - [x] Pluggable agent-column formatter (option A is the default)
 - [x] Configurable workflow statuses (IDs, labels, order, default)
 - [x] Configurable Rex binary path and default Rex app client
+- [x] Milestone 3 — template-based providers, `rexws new`, `rexws rm`
+  - Worktrunk is supported as a provider template; `wt` was not installed here
+    to verify its exact flags.
 
 ## Next
-
-### Milestone 3 — worktree providers
-
-- [ ] Template-based providers (`git`, `worktrunk`, custom)
-- [ ] `rexws new <project> <branch>`
-- [ ] `rexws rm <path>`: close the Rex session, run provider `remove`, clean state
-- [ ] Target-path rules and `worktree_root`
-- [ ] Extra template variables if needed (`{{.Project}}`, `{{.Slug}}`, …)
-- [ ] Provider timeouts and clear failure reporting
 
 ### Milestone 4 — TUI
 
@@ -66,11 +60,15 @@ concrete use case appears, not just because they are possible.
 
 - [ ] `--project`, `--agent-state`, and `--sort` filters.
 - [ ] `--config-dir` global flag (`REXWS_CONFIG_DIR` already exists).
+- [ ] `rexws project set <name>` to edit provider/worktree_root on an existing
+      project. Today `project add` refuses conflicting settings and config.json
+      must be edited by hand.
 - [ ] Richer JSON for `adopt`, `status`, and session operations.
 
 ### Environment and robustness
 
 - [ ] Optional Rex timeout setting.
+- [ ] Provider command timeouts.
 - [ ] Rex version/API-revision check with a clear error.
 - [ ] Config/state schema version and migration notes.
 

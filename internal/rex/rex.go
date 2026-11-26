@@ -130,6 +130,12 @@ func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
 	return payload.Sessions, nil
 }
 
+// KillSession destroys a live session.
+func (c *Client) KillSession(ctx context.Context, sessionID string) error {
+	_, err := c.run(ctx, "session", "kill", sessionID)
+	return err
+}
+
 // Snapshot lists sessions and reads each one's agents and windows. A failure
 // to read one session does not hide the others; the error is carried per
 // session.

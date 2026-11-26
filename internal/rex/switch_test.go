@@ -35,6 +35,7 @@ case "$*" in
   "session ls --json") printf '%s\n' '` + sessions + `' ;;
   "window ls -s session:fake --json") printf '%s\n' '` + windows + `' ;;
   *"session.select"*) printf '%s\n' "$*" >> "$log" ;;
+  *"session kill"*) printf '%s\n' "$*" >> "$log" ;;
   *) printf 'unexpected: %s\n' "$*" >&2; exit 1 ;;
 esac
 `
@@ -103,5 +104,22 @@ func TestSwitchWindowRequiresLiveSession(t *testing.T) {
 	_, err := client.Switch(ctx, "repo/main", "/tmp", "client:fake", "tests")
 	if err == nil || !strings.Contains(err.Error(), "no live session") {
 		t.Fatalf("err = %v, want a no-live-session error", err)
+	}
+}
+
+func TestKillSession(t *testing.T) {
+	client, logPath := fakeRex(t, fakeSessionList, fakeWindowList)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.KillSession(ctx, "session:fake"); err != nil {
+		t.Fatalf("KillSession: %v", err)
+	}
+	calls, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read calls: %v", err)
+	}
+	if !strings.Contains(string(calls), "session kill session:fake") {
+		t.Errorf("kill call = %q", calls)
 	}
 }

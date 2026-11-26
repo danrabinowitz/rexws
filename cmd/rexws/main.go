@@ -38,6 +38,8 @@ func newRootCmd() *cobra.Command {
 		newProjectCmd(),
 		newStatusCmd(),
 		newSwitchCmd(),
+		newNewCmd(),
+		newRmCmd(),
 	)
 	return cmd
 }

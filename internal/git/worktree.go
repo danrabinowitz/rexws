@@ -117,6 +117,44 @@ func (w Worktree) ShortHead() string {
 	return w.Head
 }
 
+// CheckBranchName asks Git whether branch is a valid branch name.
+func CheckBranchName(ctx context.Context, repoPath, branch string) error {
+	if branch == "" {
+		return errors.New("branch name is empty")
+	}
+	if strings.HasPrefix(branch, "-") {
+		return fmt.Errorf("invalid branch name %q", branch)
+	}
+	if _, err := runGit(ctx, repoPath, "check-ref-format", "--branch", branch); err != nil {
+		return fmt.Errorf("invalid branch name %q: %w", branch, err)
+	}
+	return nil
+}
+
+// WorktreesForBranch returns the non-bare, non-prunable worktrees checked out
+// on branch.
+func WorktreesForBranch(worktrees []Worktree, branch string) []Worktree {
+	var out []Worktree
+	for _, wt := range worktrees {
+		if wt.Bare || wt.Prunable {
+			continue
+		}
+		if wt.Branch == branch {
+			out = append(out, wt)
+		}
+	}
+	return out
+}
+
+// IsDirty reports whether the worktree has uncommitted or untracked changes.
+func IsDirty(ctx context.Context, worktreePath string) (bool, error) {
+	out, err := runGit(ctx, worktreePath, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return len(bytes.TrimSpace(out)) > 0, nil
+}
+
 func runGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	out, err := cmd.Output()
