@@ -44,6 +44,15 @@ type Agent struct {
 	Error        string     `json:"error,omitempty"`
 }
 
+// Window is one Rex window (tab) in a session.
+type Window struct {
+	ID             string   `json:"window_id"`
+	Label          string   `json:"label"`
+	Active         bool     `json:"active"`
+	FocusedBlockID string   `json:"focused_block_id,omitempty"`
+	BlockIDs       []string `json:"block_ids,omitempty"`
+}
+
 // Workstream is one worktree enriched with workflow and Rex state.
 type Workstream struct {
 	Project             string        `json:"project"`
@@ -57,6 +66,7 @@ type Workstream struct {
 	AgentState          AgentState    `json:"agent_state"`
 	AgentDetail         string        `json:"agent_detail,omitempty"`
 	Agents              []Agent       `json:"agents"`
+	Windows             []Window      `json:"windows"`
 	Detached            bool          `json:"detached,omitempty"`
 }
 
@@ -66,14 +76,16 @@ type Input struct {
 	Worktrees []git.Worktree
 }
 
-// Session is a Rex session enriched with its agents.
+// Session is a Rex session enriched with its agents and windows.
 type Session struct {
 	ID    string
 	Label string
 	// Agents are the session's reporting terminal blocks.
 	Agents []Agent
-	// Unreadable means the session's blocks could not be listed; Agents is
-	// then empty and the session's aggregate is unknown.
+	// Windows are the session's live windows in Rex order.
+	Windows []Window
+	// Unreadable means the session's blocks or windows could not be listed;
+	// Agents and Windows are then empty and the aggregate is unknown.
 	Unreadable bool
 }
 
@@ -113,6 +125,7 @@ func Build(inputs []Input, state config.State, sessions []Session, defaultStatus
 				Note:           stored.Note,
 				AgentState:     AgentStopped,
 				Agents:         []Agent{},
+				Windows:        []Window{},
 				Detached:       wt.Detached,
 			}
 			if session, ok := byLabel[ws.SessionName]; ok {
@@ -122,6 +135,7 @@ func Build(inputs []Input, state config.State, sessions []Session, defaultStatus
 					ws.AgentState = AgentUnknown
 				default:
 					ws.Agents = append([]Agent{}, session.Agents...)
+					ws.Windows = append([]Window{}, session.Windows...)
 					ws.AgentState, ws.AgentDetail = summarize(ws.Agents)
 				}
 			}

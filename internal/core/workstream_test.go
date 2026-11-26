@@ -43,9 +43,15 @@ func TestBuildMergesWorktreesStateAndSessions(t *testing.T) {
 		linkedPath: {Status: config.StatusBlocked, Note: "waiting on schema migration"},
 	}}
 	sessions := []Session{
-		{ID: "session:1", Label: "repo/main", Agents: []Agent{
-			{BlockID: "block:main", WindowLabel: "main", App: "claude-code", State: AgentWorking},
-		}},
+		{ID: "session:1", Label: "repo/main",
+			Agents: []Agent{
+				{BlockID: "block:main", WindowLabel: "main", App: "claude-code", State: AgentWorking},
+			},
+			Windows: []Window{
+				{ID: "window:main", Label: "main", Active: true, FocusedBlockID: "block:main", BlockIDs: []string{"block:main"}},
+				{ID: "window:tests", Label: "tests", BlockIDs: []string{"block:tests"}},
+			},
+		},
 		{ID: "session:2", Label: "repo/feat/auth", Agents: []Agent{
 			{BlockID: "block:feat", WindowLabel: "api", App: "claude-code", State: AgentBlocked, Detail: "permission"},
 		}},
@@ -81,6 +87,12 @@ func TestBuildMergesWorktreesStateAndSessions(t *testing.T) {
 	if len(main.Agents) != 1 || main.Agents[0].BlockID != "block:main" || main.Agents[0].App != "claude-code" {
 		t.Errorf("main agents = %#v", main.Agents)
 	}
+	if len(main.Windows) != 2 {
+		t.Fatalf("main windows = %#v", main.Windows)
+	}
+	if !main.Windows[0].Active || main.Windows[0].Label != "main" || main.Windows[1].Label != "tests" {
+		t.Errorf("main windows = %#v", main.Windows)
+	}
 
 	feat := byName["repo/feat/auth"]
 	if feat.WorkflowStatus != config.StatusBlocked || feat.Note != "waiting on schema migration" {
@@ -91,6 +103,9 @@ func TestBuildMergesWorktreesStateAndSessions(t *testing.T) {
 	}
 	if len(feat.Agents) != 1 || feat.Agents[0].BlockID != "block:feat" || feat.Agents[0].WindowLabel != "api" {
 		t.Errorf("feat agents = %#v", feat.Agents)
+	}
+	if feat.Windows == nil || len(feat.Windows) != 0 {
+		t.Errorf("feat windows = %#v, want an empty non-nil slice", feat.Windows)
 	}
 }
 
@@ -121,6 +136,9 @@ func TestBuildDetachedWorktree(t *testing.T) {
 	}
 	if ws.Agents == nil || len(ws.Agents) != 0 {
 		t.Errorf("agents = %#v, want an empty non-nil slice", ws.Agents)
+	}
+	if ws.Windows == nil || len(ws.Windows) != 0 {
+		t.Errorf("windows = %#v, want an empty non-nil slice", ws.Windows)
 	}
 }
 
@@ -287,6 +305,13 @@ func TestWorkstreamJSONIncludesAgents(t *testing.T) {
 			State:       AgentWorking,
 			Msg:         "Running tests",
 		}},
+		Windows: []Window{{
+			ID:             "window:1",
+			Label:          "api",
+			Active:         true,
+			FocusedBlockID: "block:1",
+			BlockIDs:       []string{"block:1"},
+		}},
 	}
 	data, err := json.Marshal(ws)
 	if err != nil {
@@ -300,6 +325,13 @@ func TestWorkstreamJSONIncludesAgents(t *testing.T) {
 			State       string `json:"state"`
 			Msg         string `json:"msg"`
 		} `json:"agents"`
+		Windows []struct {
+			ID             string   `json:"window_id"`
+			Label          string   `json:"label"`
+			Active         bool     `json:"active"`
+			FocusedBlockID string   `json:"focused_block_id"`
+			BlockIDs       []string `json:"block_ids"`
+		} `json:"windows"`
 	}
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
@@ -314,12 +346,23 @@ func TestWorkstreamJSONIncludesAgents(t *testing.T) {
 	if agent.BlockID != "block:1" || agent.WindowLabel != "api" || agent.State != "working" || agent.Msg != "Running tests" {
 		t.Errorf("agent = %#v", agent)
 	}
+	if len(decoded.Windows) != 1 {
+		t.Fatalf("windows = %#v", decoded.Windows)
+	}
+	window := decoded.Windows[0]
+	if window.ID != "window:1" || window.Label != "api" || !window.Active ||
+		window.FocusedBlockID != "block:1" || len(window.BlockIDs) != 1 || window.BlockIDs[0] != "block:1" {
+		t.Errorf("window = %#v", window)
+	}
 
-	empty, err := json.Marshal(Workstream{Agents: []Agent{}})
+	empty, err := json.Marshal(Workstream{Agents: []Agent{}, Windows: []Window{}})
 	if err != nil {
 		t.Fatalf("Marshal empty: %v", err)
 	}
 	if !strings.Contains(string(empty), `"agents":[]`) {
 		t.Errorf("empty agents should encode as [], got %s", empty)
+	}
+	if !strings.Contains(string(empty), `"windows":[]`) {
+		t.Errorf("empty windows should encode as [], got %s", empty)
 	}
 }

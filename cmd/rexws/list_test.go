@@ -24,6 +24,16 @@ func TestCoreSessions(t *testing.T) {
 					State: agentstate.Unknown, Err: errors.New("status unavailable"),
 				},
 			},
+			Windows: []rex.Window{
+				{
+					ID: "window:1", Label: "api", Active: true,
+					FocusedBlockID: "block:1", BlockIDs: []string{"block:1"},
+				},
+				{
+					ID: "window:2", Label: "tests",
+					FocusedBlockID: "block:2", BlockIDs: []string{"block:2"},
+				},
+			},
 		},
 		{
 			Session: rex.Session{ID: "session:2", Label: "repo/feat"},
@@ -50,6 +60,12 @@ func TestCoreSessions(t *testing.T) {
 	unknown := main.Agents[1]
 	if unknown.State != core.AgentUnknown || unknown.Error != "status unavailable" {
 		t.Errorf("unknown agent = %#v", unknown)
+	}
+	if len(main.Windows) != 2 {
+		t.Fatalf("main windows = %#v", main.Windows)
+	}
+	if !main.Windows[0].Active || main.Windows[0].Label != "api" || main.Windows[1].Label != "tests" {
+		t.Errorf("main windows = %#v", main.Windows)
 	}
 
 	feat := sessions[1]

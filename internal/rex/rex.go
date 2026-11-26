@@ -43,6 +43,15 @@ type Session struct {
 	Label string `json:"label"`
 }
 
+// Window is one Rex window (tab) in a session.
+type Window struct {
+	ID             string
+	Label          string
+	Active         bool
+	FocusedBlockID string
+	BlockIDs       []string
+}
+
 // StatusRecord is one OSC 7501 program status record.
 type StatusRecord struct {
 	ID           string       `json:"id,omitempty"`
@@ -82,18 +91,21 @@ type BlockStatus struct {
 	Err error
 }
 
-// SessionStatus is a session plus its reporting terminal blocks.
+// SessionStatus is a session plus its reporting terminal blocks and windows.
 type SessionStatus struct {
 	Session
-	Blocks []BlockStatus
-	// Err is set when the session's blocks could not be listed.
+	Blocks  []BlockStatus
+	Windows []Window
+	// Err is set when the session's blocks or windows could not be listed.
 	Err error
 }
 
 // SwitchResult reports what Switch did.
 type SwitchResult struct {
-	SessionID string
-	Created   bool
+	SessionID   string
+	WindowID    string
+	WindowLabel string
+	Created     bool
 }
 
 type block struct {
@@ -101,11 +113,6 @@ type block struct {
 	Label       string `json:"label"`
 	WindowID    string `json:"window_id"`
 	CreatorName string `json:"creator_name"`
-}
-
-type window struct {
-	ID    string `json:"window_id"`
-	Label string `json:"label"`
 }
 
 // ListSessions returns live sessions via `rex session ls --json`.
@@ -123,8 +130,9 @@ func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
 	return payload.Sessions, nil
 }
 
-// Snapshot lists sessions and reads each one's agents. A failure to read one
-// session does not hide the others; the error is carried per session.
+// Snapshot lists sessions and reads each one's agents and windows. A failure
+// to read one session does not hide the others; the error is carried per
+// session.
 func (c *Client) Snapshot(ctx context.Context) ([]SessionStatus, error) {
 	sessions, err := c.ListSessions(ctx)
 	if err != nil {
@@ -132,8 +140,8 @@ func (c *Client) Snapshot(ctx context.Context) ([]SessionStatus, error) {
 	}
 	out := make([]SessionStatus, 0, len(sessions))
 	for _, session := range sessions {
-		blocks, err := c.SessionAgents(ctx, session.ID)
-		out = append(out, SessionStatus{Session: session, Blocks: blocks, Err: err})
+		blocks, windows, err := c.sessionDetail(ctx, session.ID)
+		out = append(out, SessionStatus{Session: session, Blocks: blocks, Windows: windows, Err: err})
 	}
 	return out, nil
 }
@@ -142,13 +150,24 @@ func (c *Client) Snapshot(ctx context.Context) ([]SessionStatus, error) {
 // reported a program status, or an Unknown entry when its status could not be
 // read. Blocks with no reports are omitted.
 func (c *Client) SessionAgents(ctx context.Context, sessionID string) ([]BlockStatus, error) {
+	blocks, _, err := c.sessionDetail(ctx, sessionID)
+	return blocks, err
+}
+
+// sessionDetail reads a session's blocks and windows in one pass so Snapshot
+// does not fetch the window list twice.
+func (c *Client) sessionDetail(ctx context.Context, sessionID string) ([]BlockStatus, []Window, error) {
 	blocks, err := c.listBlocks(ctx, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	windows, err := c.windowLabels(ctx, sessionID)
+	windows, err := c.SessionWindows(ctx, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	labels := make(map[string]string, len(windows))
+	for _, w := range windows {
+		labels[w.ID] = w.Label
 	}
 
 	statuses := make([]BlockStatus, 0, len(blocks))
@@ -160,7 +179,7 @@ func (c *Client) SessionAgents(ctx context.Context, sessionID string) ([]BlockSt
 			BlockID:     b.ID,
 			BlockLabel:  b.Label,
 			WindowID:    b.WindowID,
-			WindowLabel: windows[b.WindowID],
+			WindowLabel: labels[b.WindowID],
 		}
 		records, err := c.programStatus(ctx, sessionID, b.ID)
 		if err != nil {
@@ -184,7 +203,7 @@ func (c *Client) SessionAgents(ctx context.Context, sessionID string) ([]BlockSt
 		status.UpdatedAt = record.UpdatedAt
 		statuses = append(statuses, status)
 	}
-	return statuses, nil
+	return statuses, windows, nil
 }
 
 func (c *Client) listBlocks(ctx context.Context, sessionID string) ([]block, error) {
@@ -195,7 +214,8 @@ func (c *Client) listBlocks(ctx context.Context, sessionID string) ([]block, err
 	return parseBlocks(out)
 }
 
-func (c *Client) windowLabels(ctx context.Context, sessionID string) (map[string]string, error) {
+// SessionWindows returns the session's windows (tabs) in Rex order.
+func (c *Client) SessionWindows(ctx context.Context, sessionID string) ([]Window, error) {
 	out, err := c.run(ctx, "window", "ls", "-s", sessionID, "--json")
 	if err != nil {
 		return nil, err
@@ -213,18 +233,50 @@ func parseBlocks(data []byte) ([]block, error) {
 	return payload.Blocks, nil
 }
 
-func parseWindows(data []byte) (map[string]string, error) {
+type rawWindow struct {
+	ID             string `json:"window_id"`
+	Label          string `json:"label"`
+	FocusedBlockID string `json:"focused_block_id"`
+	Layers         []struct {
+		Blocks []struct {
+			ID string `json:"block_id"`
+		} `json:"blocks"`
+	} `json:"layers"`
+}
+
+func parseWindows(data []byte) ([]Window, error) {
 	var payload struct {
-		Windows []window `json:"windows"`
+		ActiveWindowID string      `json:"active_window_id"`
+		Windows        []rawWindow `json:"windows"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return nil, fmt.Errorf("parse rex window ls: %w", err)
 	}
-	labels := make(map[string]string, len(payload.Windows))
+	windows := make([]Window, 0, len(payload.Windows))
 	for _, w := range payload.Windows {
-		labels[w.ID] = w.Label
+		if w.ID == "" {
+			return nil, errors.New("rex window ls returned a window without window_id")
+		}
+		blockIDs := make([]string, 0)
+		seen := make(map[string]bool)
+		for _, layer := range w.Layers {
+			for _, b := range layer.Blocks {
+				if b.ID == "" || seen[b.ID] {
+					continue
+				}
+				seen[b.ID] = true
+				blockIDs = append(blockIDs, b.ID)
+			}
+		}
+		windows = append(windows, Window{
+			ID:             w.ID,
+			Label:          w.Label,
+			Active:         w.ID == payload.ActiveWindowID,
+			FocusedBlockID: w.FocusedBlockID,
+			BlockIDs:       blockIDs,
+		})
 	}
-	return labels, nil
+	return windows, nil
 }
 
 func (c *Client) programStatus(ctx context.Context, sessionID, blockID string) ([]StatusRecord, error) {
@@ -294,8 +346,10 @@ func (c *Client) AppClient(ctx context.Context) (string, error) {
 }
 
 // Switch selects the session labeled sessionName in the Rex app, creating it
-// in dir first when it does not exist. client overrides the app client.
-func (c *Client) Switch(ctx context.Context, sessionName, dir, client string) (SwitchResult, error) {
+// in dir first when it does not exist. client overrides the app client. When
+// window is non-empty, the session must already exist and window selects one
+// of its windows by ID, ID suffix, or unique label.
+func (c *Client) Switch(ctx context.Context, sessionName, dir, client, window string) (SwitchResult, error) {
 	sessions, err := c.ListSessions(ctx)
 	if err != nil {
 		return SwitchResult{}, err
@@ -309,6 +363,9 @@ func (c *Client) Switch(ctx context.Context, sessionName, dir, client string) (S
 		}
 	}
 	if result.SessionID == "" {
+		if window != "" {
+			return SwitchResult{}, fmt.Errorf("no live session labeled %q; create it before selecting a window", sessionName)
+		}
 		out, err := c.run(ctx, "session", "new", sessionName, "-c", dir, "--json")
 		if err != nil {
 			return SwitchResult{}, err
@@ -324,6 +381,17 @@ func (c *Client) Switch(ctx context.Context, sessionName, dir, client string) (S
 		}
 		result.SessionID = created.SessionID
 		result.Created = true
+	} else if window != "" {
+		windows, err := c.SessionWindows(ctx, result.SessionID)
+		if err != nil {
+			return SwitchResult{}, err
+		}
+		selected, err := resolveWindow(windows, window)
+		if err != nil {
+			return SwitchResult{}, err
+		}
+		result.WindowID = selected.ID
+		result.WindowLabel = selected.Label
 	}
 
 	if client == "" {
@@ -332,13 +400,82 @@ func (c *Client) Switch(ctx context.Context, sessionName, dir, client string) (S
 			return SwitchResult{}, err
 		}
 	}
-	if _, err := c.run(ctx, "-C", client, "do", "session.select", "session_id="+result.SessionID); err != nil {
+	args := []string{"session_id=" + result.SessionID}
+	if result.WindowID != "" {
+		args = append(args, "window_id="+result.WindowID)
+	}
+	selectArgs := append([]string{"-C", client, "do", "session.select"}, args...)
+	if _, err := c.run(ctx, selectArgs...); err != nil {
 		if result.Created {
 			return SwitchResult{}, fmt.Errorf("created session %s but could not select it: %w", result.SessionID, err)
 		}
 		return SwitchResult{}, err
 	}
 	return result, nil
+}
+
+// resolveWindow matches a selector to a window: exact ID first, then a unique
+// label, then a unique ID suffix.
+func resolveWindow(windows []Window, selector string) (Window, error) {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return Window{}, errors.New("window selector is empty")
+	}
+	for _, w := range windows {
+		if w.ID == selector {
+			return w, nil
+		}
+	}
+
+	var matches []Window
+	for _, w := range windows {
+		if w.Label == selector {
+			matches = append(matches, w)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		return Window{}, fmt.Errorf("window label %q matches %d windows: %s; use a window ID", selector, len(matches), describeWindows(matches))
+	}
+
+	matches = nil
+	for _, w := range windows {
+		if strings.HasSuffix(w.ID, selector) {
+			matches = append(matches, w)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		return Window{}, fmt.Errorf("window %q matches %d windows: %s; use a longer window ID", selector, len(matches), describeWindows(matches))
+	}
+	return Window{}, fmt.Errorf("window %q not found (windows: %s)", selector, describeWindows(windows))
+}
+
+func describeWindows(windows []Window) string {
+	if len(windows) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(windows))
+	for _, w := range windows {
+		label := w.Label
+		if label == "" {
+			label = shortID(w.ID)
+		}
+		parts = append(parts, fmt.Sprintf("%s (%s)", label, shortID(w.ID)))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func shortID(id string) string {
+	const width = 6
+	if len(id) > width {
+		return id[len(id)-width:]
+	}
+	return id
 }
 
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {

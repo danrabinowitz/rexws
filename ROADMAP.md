@@ -9,6 +9,7 @@ concrete use case appears, not just because they are possible.
 - [x] Milestone 1 — config/state, Git worktree discovery, `project add`, `status`, `list`
 - [x] Milestone 2 — Rex adapter: sessions, per-pane program status, event parsing, `switch`
 - [x] Per-pane agent model and full `agents[]` in JSON
+- [x] Per-session window model and `switch --window` (window phase 1)
 - [x] Pluggable agent-column formatter (option A is the default)
 - [x] Configurable workflow statuses (IDs, labels, order, default)
 - [x] Configurable Rex binary path and default Rex app client
@@ -46,6 +47,14 @@ concrete use case appears, not just because they are possible.
       exceptions; a template is for a consistent convention.
 - [ ] Cwd-based session association fallback. More general than labels, but
       ambiguous when a session has multiple panes.
+
+### Windows
+
+- [ ] Window phase 2 — TUI window list: expand or show a detail pane under a
+      workstream, highlight the active window, select a window with `Enter`,
+      and refresh on `session_view_changed` / `active_window_changed`.
+- [ ] Show per-window agent badges by joining `agents[].window_id`.
+- [ ] Focus a specific block after selecting a window (`rex focus`), if needed.
 
 ### Workflow
 

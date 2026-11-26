@@ -124,6 +124,16 @@ func coreSessions(snapshot []rex.SessionStatus) ([]core.Session, []string) {
 			}
 			session.Agents = append(session.Agents, agent)
 		}
+		session.Windows = make([]core.Window, 0, len(item.Windows))
+		for _, window := range item.Windows {
+			session.Windows = append(session.Windows, core.Window{
+				ID:             window.ID,
+				Label:          window.Label,
+				Active:         window.Active,
+				FocusedBlockID: window.FocusedBlockID,
+				BlockIDs:       append([]string{}, window.BlockIDs...),
+			})
+		}
 		sessions = append(sessions, session)
 	}
 	return sessions, warnings
