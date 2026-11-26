@@ -1,7 +1,7 @@
 # rexws TUI UX spec
 
-Status: **v2 — revised after adversarial review. Pending user sign-off.**
-No implementation until this document is approved.
+Status: **v2 — approved and implemented in Milestone 4.**
+The implementation lives in `internal/tui`.
 
 Related: `SPEC.md` (product design), `ROADMAP.md` (milestones).
 
@@ -693,12 +693,17 @@ If Rex becomes unavailable after data was loaded:
 
 ## 14. Docs updates after sign-off
 
-- `SPEC.md` §2: statuses are configurable, not a fixed enum.
-- `SPEC.md` §6: replace the original flat TUI with this hierarchy, key map, and
-  search behavior.
-- `SPEC.md` §7 / `ROADMAP.md`: move window phase 2 into Milestone 4; add the §2
-  prerequisite refactors; defer status colors/icons.
-- Link this document from `SPEC.md` and `ROADMAP.md`.
+Completed with the Milestone 4 docs pass:
+
+- `SPEC.md` §6 replaced the original flat TUI design with a concise summary of
+  this hierarchy and a link here.
+- `ROADMAP.md` moved Milestone 4 and window phase 2 to Shipped, checked the
+  implemented items, and moved the deferred items to Future candidates.
+- `README.md` documents the TUI and the `rexws` / `rexws tui` launch paths.
+- This document is linked from `SPEC.md` and `ROADMAP.md`.
+
+Remaining drift outside that pass: `SPEC.md` §2 still describes workflow
+statuses as a fixed enum rather than the configurable `statuses` list.
 
 ## 15. Out of scope
 

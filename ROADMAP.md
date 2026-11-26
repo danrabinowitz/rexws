@@ -16,16 +16,18 @@ concrete use case appears, not just because they are possible.
 - [x] Milestone 3 — template-based providers, `rexws new`, `rexws rm`
   - Worktrunk is supported as a provider template; `wt` was not installed here
     to verify its exact flags.
+- [x] Milestone 4 — TUI: hierarchical workstream → window list inside
+      workflow-status groups, live Rex updates, case-insensitive substring
+      search, status switcher, and `tea.ExecProcess` handoff for `new`/`rm`.
+      See `TUI-UX.md`.
+- [x] Window phase 2 — TUI window list: active-window highlight, window
+      selection, live refresh on `session_view_changed` /
+      `active_window_changed`, and per-window agent badges.
 
 ## Next
 
-### Milestone 4 — TUI
-
-- [ ] Grouped vertical list, live Rex updates, fuzzy filter, status switcher
-- [ ] `tea.ExecProcess` handoff for interactive provider scripts
-- [ ] Status colors/icons from the status config
-- [ ] Agent formatter choice (A remains the default)
-- [ ] Session 0 / dashboard hotkey in Rex's `init.lua` (documentation)
+No milestone is committed yet. Candidates below graduate when a concrete use
+case appears.
 
 ## Future candidates
 
@@ -44,16 +46,18 @@ concrete use case appears, not just because they are possible.
 
 ### Windows
 
-- [ ] Window phase 2 — TUI window list: expand or show a detail pane under a
-      workstream, highlight the active window, select a window with `Enter`,
-      and refresh on `session_view_changed` / `active_window_changed`.
-- [ ] Show per-window agent badges by joining `agents[].window_id`.
 - [ ] Focus a specific block after selecting a window (`rex focus`), if needed.
+
+### TUI
+
+- [ ] Fuzzy ranking for search (v1 ships case-insensitive substring matching).
+- [ ] Agent formatter choice beyond the default option-A formatter.
+- [ ] Session 0 / dashboard hotkey in Rex's `init.lua` (documentation).
 
 ### Workflow
 
 - [ ] Notes: set and clear from the CLI/TUI (`state.json` already stores them).
-- [ ] Status icons/colors (with the TUI).
+- [ ] Status icons/colors from the status config (text-only badges in v1).
 - [ ] Migration diagnostics/helper when a configured status ID is removed.
 
 ### CLI ergonomics

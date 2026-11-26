@@ -10,8 +10,9 @@ your own workflow metadata, and stays out of the way.
 > `rexws` is an unofficial personal companion to Rex. It is not affiliated with,
 > endorsed by, or supported by Rex or Superlogical.
 
-**Status:** early, active development. The CLI works and is the current
-interface; an interactive dashboard is planned. See [Project status](#project-status).
+**Status:** pre-1.0, active development. The CLI and the interactive TUI both
+work; there is no tagged release and no CI yet. See
+[Project status](#project-status).
 
 ---
 
@@ -105,14 +106,14 @@ rexws project add ~/code/src/acme/repo --worktree-root ~/code/worktrees/repo
 Create a worktree for a branch, then open its Rex session:
 
 ```sh
-rexws new repo feat/auth
-rexws switch repo/feat/auth
+rexws new repo feat/auth --switch
 ```
 
-`new` only creates the worktree. `switch` creates the Rex session if it does
-not exist, then shows it in the Rex app. (A `new --switch` convenience is
-planned, not shipped.) Without `--worktree-root`, the worktree lands beside the
-repository at `<repo>-wt/<branch>`.
+`new` only creates the worktree unless you pass `--switch`, which also creates
+(or selects) the Rex session `<project>/<branch>` in the new worktree; `--client`
+chooses the Rex app client for that switch. To return to an existing workstream
+later, use `rexws switch repo/feat/auth`. Without `--worktree-root`, the
+worktree lands beside the repository at `<repo>-wt/<branch>`.
 
 Move the work forward and see where everything stands:
 
@@ -136,19 +137,32 @@ and it currently requires Rex to be reachable.
 
 | Command | Purpose |
 | --- | --- |
+| `rexws` / `rexws tui` | Launch the interactive dashboard. |
 | `rexws list [--json] [--status <id>]` | List discovered workstreams with merged Rex and workflow state. |
 | `rexws project add <path> [--name ...] [--provider ...] [--worktree-root ...]` | Register a Git repository. |
-| `rexws new <project> <branch> [--json]` | Create a worktree with the project's provider. |
+| `rexws new <project> <branch> [--json] [--switch] [--client ...]` | Create a worktree with the project's provider; with `--switch`, also create or select its Rex session. |
 | `rexws switch <project/branch> [--window ...] [--client ...] [--json]` | Show the workstream's Rex session, creating it if needed; optionally select a window. |
 | `rexws status <path> <stage> [--json]` | Set a workstream's workflow status, by ID or label. |
 | `rexws rm <path> [--json]` | Close the session, remove the worktree, clear its metadata. |
 
-Run with no arguments today, `rexws` prints a placeholder; the interactive
-dashboard is planned.
+### TUI
 
-Every command accepts `--json` for scripts and future launchers. The JSON
-shapes are usable but **not frozen** — there is no `schema_version` yet, so
-treat them as unstable.
+Run `rexws` with no arguments, or `rexws tui`, to open the interactive
+dashboard. It keeps the workflow-status groups from `list` and adds an accordion
+inside them: each workstream expands to its Rex windows. `Enter` confirms the
+highlighted row (switch to the session, or to the selected window). `Right`
+expands a parent; a second `Right` moves into its first child, and `Left`
+collapses or returns to the parent. `/` filters by case-insensitive substring
+across project, branch, workflow status, agent state, and windows while keeping
+parent context.
+Live Rex streams update agent badges and window state as they change. Press `?`
+for the full key map and `s` to change a workstream's status.
+
+See `TUI-UX.md` for the full UX design.
+
+Every command that reports data accepts `--json` for scripts and future
+launchers. The JSON shapes are usable but **not frozen** — there is no
+`schema_version` yet, so treat them as unstable.
 
 ---
 
@@ -227,15 +241,15 @@ the configured default status. `note` is stored but has no editing command yet.
 
 These are constraints the project is designed around, not aspirations:
 
-1. **No daemon.** Commands are one-shot. The TUI, when it arrives, is an
-   interactive client, not a service. Rex already runs the server.
+1. **No daemon.** Commands are one-shot. The TUI is an interactive client, not
+   a service. Rex already runs the server.
 2. **Git and Rex are the sources of truth.** `rexws` persists only its own
    configuration and workflow metadata. No shadow database, no index, no cache.
 3. **Local-first.** No network service, cloud sync, or telemetry. It talks to
    the local Rex CLI and nothing else. macOS is the tested platform; other
    platforms are untested.
 4. **One static Go binary.** No CGO, minimal dependencies. The CLI uses Cobra;
-   the planned TUI will add the Charm stack.
+   the TUI uses the Charm stack.
 5. **Plain text, human-editable.** JSON under a standard XDG config directory,
    written atomically with `0600` permissions.
 6. **Convention over configuration.** Session labels (`<project>/<branch>`),
@@ -329,14 +343,14 @@ may change without migration support.
 - Git worktree discovery, `project add`, `list` (table and JSON), and `status`.
 - Rex integration: session listing, per-pane program status, session lifecycle
   and status event parsing, and `switch` for sessions and windows.
-- Template-based worktree providers, the built-in Git provider, `new`, and
-  `rm` with main-worktree, dirty-worktree, and Rex pre-checks.
+- Template-based worktree providers, the built-in Git provider, `new` (including
+  `--switch`), and `rm` with main-worktree, dirty-worktree, and Rex pre-checks.
+- The interactive TUI (`rexws` or `rexws tui`): workflow-status groups, an
+  expandable workstream → window hierarchy, substring search, status switching,
+  and live Rex updates.
 
 **Planned:**
 
-- The interactive dashboard. The approved UX direction is in `TUI-UX.md`; it is
-  a design document, not a description of shipped behavior.
-- `new --switch`.
 - Session adoption and label templates, a notes editing path, selector grammar,
   a normalized event stream, and machine-readable predicates.
 
@@ -348,7 +362,7 @@ may change without migration support.
 - The JSON contract is not frozen and has no `schema_version`.
 
 See `ROADMAP.md` for what is committed next, `SPEC.md` for the current design,
-`IDEAS.md` for the unranked idea bank, and `TUI-UX.md` for the dashboard design.
+`IDEAS.md` for the unranked idea bank, and `TUI-UX.md` for the TUI UX.
 
 ---
 

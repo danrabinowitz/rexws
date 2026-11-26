@@ -144,43 +144,19 @@ Running `rexws` with no arguments launches the TUI. Subcommands expose the same 
 
 ---
 
-## 6. TUI Design (Grouped Vertical List)
+## 6. TUI Design
 
-Start with a **grouped vertical list**—it handles long branch names, project tags, and agent badges cleanly, and is straightforward to extend with a Kanban column view later.
+The TUI is an accordion inside the existing workflow-status groups. Workstreams
+are the parent rows and Rex windows are their children; status group headers and
+agent badges are not navigable. `Enter` confirms the highlighted row (`Right`
+expands a parent, and a second `Right` enters its first child; `Left` collapses
+or returns to the parent). `/` filters the hierarchy by case-insensitive
+substring while keeping parent context. Live `rex events` streams update agent
+badges and window state, and `s` changes a workstream's workflow status.
 
-### Layout
-
-```text
- REXWS  [Filter: /]  [3 active · 1 blocked]
-────────────────────────────────────────────────────────────────────
- ▼ IN PROGRESS (2)
- > billing      feat-oauth-pkce          ▲ blocked (permission)
-   do-si-do     refactor-sync            ● working
-
- ▼ BLOCKED (1)
-   monorepo     sparse-api-v2            ○ idle
-
- ▼ IN REVIEW (1)
-   local-llms   bench-q4                 ✓ done
-
- ▼ READY (3)
-   .ai          main                     — stopped
-   ...
-────────────────────────────────────────────────────────────────────
- [Enter] switch  [s] status  [n] new  [d] remove  [/] filter  [?] help
-
-```
-
-### Keybindings
-
-* `j` / `k` or `↑` / `↓`: Navigate workstreams (skips group headers).
-* `Enter`: Switch to Rex session (or create + switch if stopped).
-* `s`: Open quick status selector (`1` In Progress, `2` Blocked, `3` In Review, `4` Ready, `5` Done).
-* `n`: Create new worktree (pick project → enter branch name → runs provider via `tea.ExecProcess`).
-* `d`: Archive/remove worktree (with confirmation prompt; closes Rex session + runs provider `remove`).
-* `/`: Live fuzzy filter across project, branch, workflow status, and agent state (e.g., typing `blocked` shows both `Blocked` workflow items and `▲ blocked` agents).
-* `r`: Force refresh Git worktrees and Rex sessions.
-* `q`: Quit.
+`TUI-UX.md` is the full UX source of truth: layout, keybindings, search
+visibility rules, live-update behavior, error/startup states, and acceptance
+criteria. This section intentionally does not duplicate it.
 
 ---
 
@@ -189,4 +165,4 @@ Start with a **grouped vertical list**—it handles long branch names, project t
 1. **Milestone 1 — Core + CLI (`list`, `status`, `project add`):** Config/state loader, `git worktree list --porcelain` parser, and `rexws list --json`.
 2. **Milestone 2 — Rex Adapter:** Inspect local `rex` CLI flags, implement session listing, `rex events --json` stream parsing, and `rexws switch`.
 3. **Milestone 3 — Pluggable Providers:** Implement template-based `git`, `worktrunk`, and `custom` providers for `rexws new` and `rexws rm`.
-4. **Milestone 4 — Bubbletea TUI:** Grouped vertical list, live `rex events` updates, fuzzy filter, status switcher, and `tea.ExecProcess` handoff for `new`/`rm`.
+4. **Milestone 4 — TUI (implemented):** Accordion hierarchy inside status groups, live `rex events` updates, case-insensitive substring filter, status switcher, and `tea.ExecProcess` handoff for `new`/`rm`. The UX is specified in `TUI-UX.md`.
