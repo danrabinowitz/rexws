@@ -370,3 +370,5 @@ See `ROADMAP.md` for what is committed next, `SPEC.md` for the current design,
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+<!-- ci smoke test: verify pull-request trigger; closed without merge -->
