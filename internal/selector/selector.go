@@ -70,6 +70,28 @@ func (e *AmbiguousError) Error() string {
 // Unwrap exposes ErrAmbiguous to errors.Is.
 func (e *AmbiguousError) Unwrap() error { return ErrAmbiguous }
 
+// AmbiguousCurrentError reports that several worktrees claim the same
+// directory. It is the directory form of AmbiguousError: callers that resolved
+// a directory rather than a selector (rexws here --dir) get a message about
+// the directory instead of a selector they never typed.
+type AmbiguousCurrentError struct {
+	Dir        string
+	Candidates []Candidate
+}
+
+func (e *AmbiguousCurrentError) Error() string {
+	ids := make([]string, 0, len(e.Candidates))
+	for _, candidate := range e.Candidates {
+		ids = append(ids, fmt.Sprintf("%s (%s)", candidate.SessionName, candidate.Path))
+	}
+	return fmt.Sprintf("%s is claimed by %d registered workstreams: %s; the projects share this directory, so remove one registration",
+		e.Dir, len(ids), strings.Join(ids, ", "))
+}
+
+// Unwrap exposes ErrAmbiguous to errors.Is, so a directory claimed twice keeps
+// the ambiguous-selector exit code.
+func (e *AmbiguousCurrentError) Unwrap() error { return ErrAmbiguous }
+
 // NoActiveWorkstreamError reports that active or current was used outside
 // every discovered worktree.
 type NoActiveWorkstreamError struct {
@@ -211,10 +233,43 @@ func (r *Resolver) current(selector string, cwd cwdSource) (Candidate, error) {
 	if err != nil {
 		return Candidate{}, fmt.Errorf("resolve current directory: %w", err)
 	}
-	dir, err := pathutil.Canonical(raw)
-	if err != nil {
-		return Candidate{}, fmt.Errorf("resolve current directory: %w", err)
+	candidate, err := r.Current(raw)
+	if err == nil {
+		return candidate, nil
 	}
+	var ambiguous *AmbiguousCurrentError
+	if errors.As(err, &ambiguous) {
+		return r.unique(selector, ambiguous.Candidates)
+	}
+	if errors.Is(err, ErrNoActiveWorkstream) {
+		return Candidate{}, err
+	}
+	return Candidate{}, fmt.Errorf("resolve current directory: %w", err)
+}
+
+// Current resolves the workstream whose path contains dir, the rule behind the
+// active/current selectors. The deepest containing worktree wins; a tie is an
+// error. It names the directory, never a selector, so callers that resolved a
+// directory directly (rexws here --dir) get a message they can act on. A
+// leading ~ or ~/ in dir expands to the home directory, matching path:.
+func (r *Resolver) Current(dir string) (Candidate, error) {
+	canonical, err := pathutil.Canonical(expandHome(dir))
+	if err != nil {
+		return Candidate{}, err
+	}
+	matches := r.containing(canonical)
+	switch len(matches) {
+	case 0:
+		return Candidate{}, &NoActiveWorkstreamError{Dir: canonical}
+	case 1:
+		return matches[0], nil
+	default:
+		return Candidate{}, &AmbiguousCurrentError{Dir: canonical, Candidates: sortedCandidates(matches)}
+	}
+}
+
+// containing returns the deepest candidates whose worktree contains dir.
+func (r *Resolver) containing(dir string) []Candidate {
 	var matches []Candidate
 	longest := -1
 	for _, candidate := range r.candidates {
@@ -229,10 +284,7 @@ func (r *Resolver) current(selector string, cwd cwdSource) (Candidate, error) {
 			matches = append(matches, candidate)
 		}
 	}
-	if len(matches) == 0 {
-		return Candidate{}, &NoActiveWorkstreamError{Dir: dir}
-	}
-	return r.unique(selector, matches)
+	return matches
 }
 
 func (r *Resolver) byBranch(branch string) []Candidate {
@@ -313,15 +365,21 @@ func (r *Resolver) unique(input string, matches []Candidate) (Candidate, error) 
 	case 1:
 		return matches[0], nil
 	default:
-		sorted := append([]Candidate(nil), matches...)
-		sort.SliceStable(sorted, func(i, j int) bool {
-			if sorted[i].SessionName != sorted[j].SessionName {
-				return sorted[i].SessionName < sorted[j].SessionName
-			}
-			return sorted[i].Path < sorted[j].Path
-		})
-		return Candidate{}, &AmbiguousError{Selector: input, Candidates: sorted}
+		return Candidate{}, &AmbiguousError{Selector: input, Candidates: sortedCandidates(matches)}
 	}
+}
+
+// sortedCandidates orders matches by identity, then path, so every error lists
+// the same candidates in the same order.
+func sortedCandidates(matches []Candidate) []Candidate {
+	sorted := append([]Candidate(nil), matches...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].SessionName != sorted[j].SessionName {
+			return sorted[i].SessionName < sorted[j].SessionName
+		}
+		return sorted[i].Path < sorted[j].Path
+	})
+	return sorted
 }
 
 func currentDir(cwd cwdSource) (string, error) {

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/danrabinowitz/rexws/internal/config"
+	"github.com/danrabinowitz/rexws/internal/core"
 	"github.com/danrabinowitz/rexws/internal/selector"
 )
 
@@ -127,6 +128,151 @@ func TestResolveWorkstreamAmbiguousAndNoMatch(t *testing.T) {
 	_, err = ResolveWorkstream(context.Background(), cfg, "active")
 	if !errors.Is(err, selector.ErrNoActiveWorkstream) {
 		t.Fatalf("active outside: err = %v, want ErrNoActiveWorkstream", err)
+	}
+}
+
+func TestResolveHereAtProcessAndExplicitDirectories(t *testing.T) {
+	repo := testRepo(t)
+	root := filepath.Join(t.TempDir(), "worktrees")
+	cfg := testConfig(t, repo, root)
+	target := filepath.Join(root, "feat", "here")
+	gitRun(t, repo, "worktree", "add", "-q", "-b", "feat/here", target)
+	targetPath := canonical(t, target)
+	nested := filepath.Join(target, "internal", "deep")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	outside := t.TempDir()
+	t.Chdir(outside)
+	candidate, discovery, err := ResolveHere(context.Background(), cfg, nested)
+	if err != nil {
+		t.Fatalf("ResolveHere(%q): %v", nested, err)
+	}
+	if candidate.Path != targetPath || candidate.SessionName != "repo/feat/here" {
+		t.Errorf("candidate = %#v", candidate)
+	}
+	if len(discovery.Inputs) != 1 || len(discovery.Inputs[0].Worktrees) != 2 {
+		t.Errorf("discovery = %#v, want the snapshot used for resolution", discovery)
+	}
+
+	t.Chdir(nested)
+	candidate, _, err = ResolveHere(context.Background(), cfg, "")
+	if err != nil {
+		t.Fatalf("ResolveHere(process cwd): %v", err)
+	}
+	if candidate.Path != targetPath {
+		t.Errorf("process cwd path = %q, want %q", candidate.Path, targetPath)
+	}
+
+	t.Chdir(outside)
+	if _, _, err := ResolveHere(context.Background(), cfg, ""); !errors.Is(err, selector.ErrNoActiveWorkstream) {
+		t.Fatalf("outside err = %v, want ErrNoActiveWorkstream", err)
+	}
+	if _, _, err := ResolveHere(context.Background(), cfg, outside); !errors.Is(err, selector.ErrNoActiveWorkstream) {
+		t.Fatalf("explicit outside err = %v, want ErrNoActiveWorkstream", err)
+	}
+
+	// A nonexistent --dir is bad input, not a workstream miss, and the error
+	// names the flag and the path.
+	missing := filepath.Join(outside, "missing")
+	_, _, err = ResolveHere(context.Background(), cfg, missing)
+	if err == nil || !strings.Contains(err.Error(), `--dir "`+missing+`"`) {
+		t.Fatalf("missing --dir err = %v, want the flag and path named", err)
+	}
+	if errors.Is(err, selector.ErrNoActiveWorkstream) {
+		t.Errorf("missing --dir err = %v, want a bad-input error", err)
+	}
+}
+
+func TestResolveHereWithNoProjectsSuggestsProjectAdd(t *testing.T) {
+	t.Chdir(t.TempDir())
+	_, _, err := ResolveHere(context.Background(), config.Default(), "")
+	if !errors.Is(err, selector.ErrNoActiveWorkstream) {
+		t.Fatalf("err = %v, want ErrNoActiveWorkstream", err)
+	}
+	if !strings.Contains(err.Error(), "rexws project add <path>") {
+		t.Errorf("err = %v, want the project-add hint", err)
+	}
+}
+
+func TestContextSelectorAvoidsLookalikeLabels(t *testing.T) {
+	lookalike := core.Workstream{Project: "path:odd", Branch: "main", Path: "/wt/lookalike", SessionName: "path:odd/main"}
+	if got := ContextSelector([]core.Workstream{lookalike}, lookalike); got != "path:/wt/lookalike" {
+		t.Errorf("colon-named project selector = %q, want the path form", got)
+	}
+	spaced := core.Workstream{Project: " repo", Branch: "main", Path: "/wt/spaced", SessionName: " repo/main"}
+	if got := ContextSelector([]core.Workstream{spaced}, spaced); got != "path:/wt/spaced" {
+		t.Errorf("whitespace-named project selector = %q, want the path form", got)
+	}
+	dashed := core.Workstream{Project: "-weird", Branch: "main", Path: "/wt/dashed", SessionName: "-weird/main"}
+	if got := ContextSelector([]core.Workstream{dashed}, dashed); got != "path:/wt/dashed" {
+		t.Errorf("dash-named project selector = %q, want the path form", got)
+	}
+}
+
+func TestContextSelectorRoundTripsThroughPrepareRemove(t *testing.T) {
+	repo := testRepo(t)
+	root := filepath.Join(t.TempDir(), "worktrees")
+	cfg := testConfig(t, repo, root)
+	one := filepath.Join(root, "feat", "one")
+	gitRun(t, repo, "worktree", "add", "-q", "-b", "feat/one", one)
+	onePath := canonical(t, one)
+
+	writeFakeRex(t, `case "$*" in
+  "session ls --json") printf '%s\n' '{"sessions":[]}' ;;
+  *) printf 'unexpected: %s\n' "$*" >&2; exit 1 ;;
+esac
+`)
+
+	other := core.Workstream{Project: "repo", Branch: "feat/two", Path: filepath.Join(root, "feat", "two"), SessionName: "repo/feat/two"}
+	workstream := core.Workstream{Project: "repo", Branch: "feat/one", Path: onePath, SessionName: "repo/feat/one"}
+
+	selector := ContextSelector([]core.Workstream{workstream, other}, workstream)
+	if selector != "repo/feat/one" {
+		t.Errorf("selector = %q, want the unique exact label", selector)
+	}
+	plan, err := PrepareRemove(context.Background(), cfg, selector)
+	if err != nil {
+		t.Fatalf("PrepareRemove(%q): %v", selector, err)
+	}
+	if plan.Path != onePath {
+		t.Errorf("plan path = %q, want %q", plan.Path, onePath)
+	}
+
+	// A second worktree on the same branch makes the label ambiguous, so the
+	// selector must fall back to the path form and still resolve.
+	dup := filepath.Join(root, "feat", "one-dup")
+	gitRun(t, repo, "worktree", "add", "-q", "--force", dup, "feat/one")
+	dupPath := canonical(t, dup)
+	duplicate := core.Workstream{Project: "repo", Branch: "feat/one", Path: dupPath, SessionName: "repo/feat/one"}
+	selector = ContextSelector([]core.Workstream{workstream, duplicate}, duplicate)
+	if selector != "path:"+dupPath {
+		t.Fatalf("selector = %q, want the path form", selector)
+	}
+	plan, err = PrepareRemove(context.Background(), cfg, selector)
+	if err != nil {
+		t.Fatalf("PrepareRemove(%q): %v", selector, err)
+	}
+	if plan.Path != dupPath {
+		t.Errorf("plan path = %q, want %q", plan.Path, dupPath)
+	}
+
+	// A detached worktree always uses the path form.
+	detached := filepath.Join(root, "detached")
+	gitRun(t, repo, "worktree", "add", "-q", "--detach", detached, "HEAD")
+	detachedPath := canonical(t, detached)
+	detachedWS := core.Workstream{Project: "repo", Branch: "0123456", Path: detachedPath, SessionName: "repo/0123456", Detached: true}
+	selector = ContextSelector([]core.Workstream{detachedWS}, detachedWS)
+	if selector != "path:"+detachedPath {
+		t.Fatalf("detached selector = %q, want the path form", selector)
+	}
+	plan, err = PrepareRemove(context.Background(), cfg, selector)
+	if err != nil {
+		t.Fatalf("PrepareRemove(%q): %v", selector, err)
+	}
+	if plan.Path != detachedPath {
+		t.Errorf("plan path = %q, want %q", plan.Path, detachedPath)
 	}
 }
 

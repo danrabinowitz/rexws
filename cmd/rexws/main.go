@@ -55,6 +55,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(
 		newTuiCmd(),
 		newListCmd(),
+		newHereCmd(),
 		newProjectCmd(),
 		newStatusCmd(),
 		newSwitchCmd(),

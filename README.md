@@ -141,6 +141,7 @@ and it currently requires Rex to be reachable.
 | --- | --- |
 | `rexws` / `rexws tui` | Launch the interactive dashboard. |
 | `rexws list [--json] [--status <id>]` | List discovered workstreams with merged Rex and workflow state. |
+| `rexws here [--dir <path>] [--json]` | Show the workstream containing the current directory (or `--dir`). |
 | `rexws project add <path> [--name ...] [--provider ...] [--worktree-root ...]` | Register a Git repository. |
 | `rexws new <project> <branch> [--json] [--switch] [--client ...]` | Create a worktree with the project's provider; with `--switch`, also create or select its Rex session. |
 | `rexws switch <selector> [--window ...] [--client ...] [--json]` | Show the workstream's Rex session, creating it if needed; optionally select a window. |
@@ -170,8 +171,9 @@ not a substring match; only nonexistent inputs reach the substring rule. An
 ambiguous selector is an error that lists every candidate and suggests `path:`;
 it never picks the first. Detached worktrees are identified by their
 abbreviated HEAD commit, so two detached worktrees at the same commit share an
-identity by construction; choose one with `path:`. `rexws here` (see
-`ROADMAP.md`) will use the same grammar with the current-directory form.
+identity by construction; choose one with `path:`. `rexws here` uses the same
+containment rule for the current directory; see
+[Resolving the current workstream](#resolving-the-current-workstream).
 
 Selector failures have stable exit codes so scripts can branch without parsing
 messages:
@@ -179,10 +181,56 @@ messages:
 | Exit code | Meaning |
 | --- | --- |
 | `0` | Success. |
-| `1` | Any other error. |
+| `1` | Any other error, including a `--dir` that does not exist. |
 | `2` | The selector matched no workstream. |
-| `3` | The selector matched more than one workstream. |
-| `4` | `active` or `current` was used outside every workstream. |
+| `3` | The selector matched more than one workstream, or a directory is claimed by more than one registered workstream. |
+| `4` | `active` or `current` — or `rexws here` — was used outside every workstream. |
+
+### Resolving the current workstream
+
+`rexws here` resolves the workstream whose worktree contains the current
+directory, including any subdirectory, using the same containment rule as
+`active`. `--dir <path>` resolves from another directory instead; the path may
+be relative, symlinked, end with `/`, or start with `~/`. An empty `--dir` is an
+error.
+
+```sh
+$ cd ~/code/worktrees/repo/feat-auth/internal
+$ rexws here
+project   repo
+branch    feat/auth
+path      /Users/you/code/worktrees/repo/feat-auth
+session   repo/feat/auth
+status    In Progress
+selector  repo/feat/auth
+```
+
+`selector` is the value to hand to `switch`, `status`, or `rm`. It always
+resolves to exactly this workstream: the exact `<project>/<branch>` label when
+that label is unique and passes through the selector grammar unchanged, and
+`path:<path>` otherwise — a detached worktree, a branch checked out in more than
+one worktree, or a project name containing `:` or surrounding whitespace.
+`session_name` is the human and Rex label; another worktree can share it, a
+detached worktree's label is derived from HEAD and changes when HEAD moves, and
+it is not unique in those cases. `--json` adds the workflow status ID and the
+display label that `list` and `status` also use, plus `"detached": true` for a
+detached worktree:
+
+```json
+{
+  "project": "repo",
+  "branch": "feat/auth",
+  "path": "/Users/you/code/worktrees/repo/feat-auth",
+  "session_name": "repo/feat/auth",
+  "workflow_status": "in_progress",
+  "workflow_status_label": "In Progress",
+  "selector": "repo/feat/auth"
+}
+```
+
+Outside every registered worktree, `here` fails with exit code `4` rather than
+printing an empty result. A `--dir` that does not exist is ordinary bad input
+and exits `1`, with the flag and path named in the error.
 
 ### TUI
 
@@ -386,7 +434,8 @@ may change without migration support.
   `--switch`), and `rm` with main-worktree, dirty-worktree, and Rex pre-checks.
 - One selector grammar for `switch`, `status`, and `rm`: exact
   `<project>/<branch>`, `branch:`, `path:`, `name:`, `active`/`current`, and
-  unique case-insensitive substrings.
+  unique case-insensitive substrings; `here` resolves the workstream containing
+  the current directory.
 - The interactive TUI (`rexws` or `rexws tui`): workflow-status groups, an
   expandable workstream → window hierarchy, substring search, status switching,
   and live Rex updates.

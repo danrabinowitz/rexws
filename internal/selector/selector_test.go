@@ -401,6 +401,69 @@ func TestResolvePathExpandsHome(t *testing.T) {
 	}
 }
 
+func TestCurrentNamesDirectoryWithoutSelector(t *testing.T) {
+	f := newFixture(t)
+	nested := mkdir(t, f.featAuth, "internal")
+
+	candidate, err := f.resolver.Current(nested)
+	if err != nil {
+		t.Fatalf("Current(%q): %v", nested, err)
+	}
+	if candidate.Path != f.featAuth {
+		t.Errorf("Current = %s, want %s", candidate.Path, f.featAuth)
+	}
+
+	_, err = f.resolver.Current(f.base)
+	if !errors.Is(err, ErrNoActiveWorkstream) {
+		t.Fatalf("Current outside err = %v, want ErrNoActiveWorkstream", err)
+	}
+	if strings.Contains(err.Error(), "selector") {
+		t.Errorf("outside error names a selector: %v", err)
+	}
+
+	// The same directory registered twice (for example under two project
+	// names) is an error about the directory, not about a selector.
+	both := New([]Candidate{
+		{Project: config.Project{Name: "repo"}, Path: f.featAuth, Branch: "feat/auth", SessionName: "repo/feat/auth"},
+		{Project: config.Project{Name: "other"}, Path: f.featAuth, Branch: "feat/auth", SessionName: "other/feat/auth"},
+	})
+	_, err = both.Current(f.featAuth)
+	if !errors.Is(err, ErrAmbiguous) {
+		t.Fatalf("claimed dir err = %v, want ErrAmbiguous", err)
+	}
+	var ambiguous *AmbiguousCurrentError
+	if !errors.As(err, &ambiguous) || len(ambiguous.Candidates) != 2 {
+		t.Fatalf("err = %#v, want *AmbiguousCurrentError with two candidates", err)
+	}
+	if strings.Contains(err.Error(), "selector") {
+		t.Errorf("claimed-dir error names a selector: %v", err)
+	}
+	for _, want := range []string{f.featAuth, "claimed by 2", "repo/feat/auth", "other/feat/auth", "remove one registration"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("claimed-dir error does not mention %q: %v", want, err)
+		}
+	}
+}
+
+func TestCurrentExpandsHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	worktree := mkdir(t, home, "wt")
+	resolver := New([]Candidate{{
+		Project:     config.Project{Name: "repo"},
+		Path:        worktree,
+		Branch:      "main",
+		SessionName: "repo/main",
+	}})
+	candidate, err := resolver.Current("~/wt")
+	if err != nil {
+		t.Fatalf("Current(~/wt): %v", err)
+	}
+	if candidate.Path != worktree {
+		t.Errorf("candidate = %s, want %s", candidate.Path, worktree)
+	}
+}
+
 func TestFromInputsSkipsBareAndPrunableAndUsesShortHead(t *testing.T) {
 	base := t.TempDir()
 	main := mkdir(t, base, "repo")
