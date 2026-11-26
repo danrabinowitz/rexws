@@ -4,6 +4,9 @@ Direction, not a commitment. `SPEC.md` describes the current design; this file
 tracks what we might build next. Items should graduate to a milestone when a
 concrete use case appears, not just because they are possible.
 
+Actionable tasks live in GitHub issues and carry the acceptance criteria; this
+file records direction and sequence. `IDEAS.md` is the unranked idea bank.
+
 ## Shipped
 
 - [x] Milestone 1 — config/state, Git worktree discovery, `project add`, `status`, `list`
@@ -26,8 +29,48 @@ concrete use case appears, not just because they are possible.
 
 ## Next
 
-No milestone is committed yet. Candidates below graduate when a concrete use
-case appears.
+Sequenced by dependency and risk, not by appeal. Every issue link repeats its
+title so this file stands alone.
+
+### M5 · TUI reliability
+
+Finish the in-flight live-stream rework and get the repository to a clean base.
+
+- [#1 TUI: finish live-stream reliability (stream hub reconnect)](https://github.com/danrabinowitz/rexws/issues/1)
+- [#2 Infra: add CI and push main](https://github.com/danrabinowitz/rexws/issues/2)
+- [#3 Cleanup: remove stale worktrees and branches](https://github.com/danrabinowitz/rexws/issues/3)
+
+### M6 · Contract seams
+
+The cheap contracts every later command and agent workflow builds on.
+
+- [#4 S1 · Selector grammar: one resolver for every command](https://github.com/danrabinowitz/rexws/issues/4)
+- [#5 S7 · Context resolution: `rexws here`](https://github.com/danrabinowitz/rexws/issues/5)
+
+### M7 · Worktree cleanup
+
+Preview-first cleanup of worktrees, branches, and orphans, plus the frozen JSON
+contract once cleanup's fields exist.
+
+- [#6 S2 · Freeze the JSON contract: `schema_version` and `rexws schema`](https://github.com/danrabinowitz/rexws/issues/6)
+- [#7 C18 · Cleanup candidate report (preview-first)](https://github.com/danrabinowitz/rexws/issues/7)
+- [#8 C15 · Safe remove and explicit branch deletion](https://github.com/danrabinowitz/rexws/issues/8)
+- [#9 C20 · Orphan triage: unmatched sessions, stale state, unregistered worktrees](https://github.com/danrabinowitz/rexws/issues/9)
+- [#10 TUI: cleanup view with preview and bulk apply](https://github.com/danrabinowitz/rexws/issues/10)
+
+### M8 · TUI design
+
+Designer-led visual system, wide-terminal layout, and configurable status
+colors/icons.
+
+- [#11 TUI design brief: visual system, wide layout, hierarchy](https://github.com/danrabinowitz/rexws/issues/11)
+- [#12 TUI: implement the visual system and wide-terminal layout](https://github.com/danrabinowitz/rexws/issues/12)
+- [#13 Status config: per-status color and icon](https://github.com/danrabinowitz/rexws/issues/13)
+
+### Later
+
+- [#14 Docs: fix `SPEC.md` drift from shipped behavior](https://github.com/danrabinowitz/rexws/issues/14)
+- [#15 Release: screenshots, demo GIF, site, and video; settle the name](https://github.com/danrabinowitz/rexws/issues/15)
 
 ## Future candidates
 
@@ -57,7 +100,6 @@ case appears.
 ### Workflow
 
 - [ ] Notes: set and clear from the CLI/TUI (`state.json` already stores them).
-- [ ] Status icons/colors from the status config (text-only badges in v1).
 - [ ] Migration diagnostics/helper when a configured status ID is removed.
 
 ### CLI ergonomics
@@ -78,9 +120,10 @@ case appears.
 
 ### Docs
 
-- [ ] README: install, CLI reference, config examples, Rex integration.
 - [ ] `docs/rex-cli.md`: verified Rex commands and JSON shapes used by rexws.
 - [ ] Document the per-pane agent model and the status configuration.
+- [ ] `SPEC.md` drift reconciliation is tracked as
+      [#14 Docs: fix `SPEC.md` drift from shipped behavior](https://github.com/danrabinowitz/rexws/issues/14).
 
 ## Not planned (for now)
 

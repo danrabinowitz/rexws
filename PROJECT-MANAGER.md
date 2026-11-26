@@ -25,7 +25,10 @@ refinement.
 
 - `README.md` — what rexws is, the mental model, install/usage, project status.
 - `SPEC.md` — product design (note the remaining drift in §8).
-- `ROADMAP.md` — the commitment; `IDEAS.md` is an unranked idea bank, not a plan.
+- `ROADMAP.md` — the sequence; `IDEAS.md` is an unranked idea bank, not a plan.
+- GitHub issues — the actionable tasks and agent briefs. Each issue carries its
+  own context, scope, and acceptance criteria so it can be handed to an agent
+  whole. `git log` and the docs stay the record of what shipped.
 - `TUI-UX.md` — the source of truth for TUI behavior.
 - `internal/tui` and the rest of the code before promising a behavior.
 
@@ -228,6 +231,9 @@ non-trivial changes.
 ## 9. Coordination protocol
 
 - Plan first for substantive work; agree with the user before editing.
+- Track work in GitHub issues (`gh issue list`, `gh issue view <n>`); close one
+  from the commit or pull request that satisfies its acceptance criteria. Keep
+  `TODO.md` untouched.
 - Use one implementation agent per worktree; use `tui-designer` for TUI layout
   audits and `adversarial-reviewer` for diffs/specs when useful.
 - Report at phase boundaries: what changed, tests run, blockers, and any spec
