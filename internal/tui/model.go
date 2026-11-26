@@ -99,6 +99,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleStatusDone(msg)
 	case removePreparedMsg:
 		return m.handleRemovePrepared(msg)
+	case cleanupPlannedMsg:
+		return m.handleCleanupPlanned(msg)
+	case cleanupAppliedMsg:
+		return m.handleCleanupApplied(msg)
 	case removeSessionClosedMsg:
 		return m.handleRemoveSessionClosed(msg)
 	case removeExecDoneMsg:
@@ -187,6 +191,17 @@ func (m *Model) applyEffects(e Effects) (*Model, tea.Cmd) {
 		m.state.pending = true
 		m.state.pendingLabel = "preparing…"
 		cmds = append(cmds, prepareCreateCmd(m.ctx, m.state.cfg, *e.Create))
+	}
+	if e.BeginCleanup {
+		token := 0
+		if m.state.cleanup != nil {
+			token = m.state.cleanup.token
+		}
+		cmds = append(cmds, cleanupPlanCmd(m.ctx, m.state.cfg, token))
+	}
+	if e.ApplyCleanup != nil {
+		report := *e.ApplyCleanup
+		cmds = append(cmds, applyCleanupCmd(m.ctx, m.state.cfg, report))
 	}
 	return m, batch(cmds)
 }
@@ -563,6 +578,104 @@ func (m *Model) handleRemovePrepared(msg removePreparedMsg) (*Model, tea.Cmd) {
 	}
 	m.state.mode = ModeRemove
 	return m, nil
+}
+
+// cleanupPlannedMsg carries a cleanup preview. Apply is true so the plan is
+// apply-capable: it refuses when Rex is unavailable and never misses a live
+// session. Force is true so every dirty or unmerged item has its loss and
+// action populated; the TUI gates selecting those items on its own force flag.
+type cleanupPlannedMsg struct {
+	token  int
+	report ops.CleanupReport
+	err    error
+}
+
+func cleanupPlanCmd(ctx context.Context, cfg config.Config, token int) tea.Cmd {
+	return func() tea.Msg {
+		report, err := ops.PlanCleanup(ctx, cfg, ops.CleanupOptions{Apply: true, Force: true})
+		return cleanupPlannedMsg{token: token, report: report, err: err}
+	}
+}
+
+func (m *Model) handleCleanupPlanned(msg cleanupPlannedMsg) (*Model, tea.Cmd) {
+	view := m.state.cleanup
+	if view == nil || view.token != msg.token || !view.loading {
+		// The screen was closed or a newer scan replaced this one.
+		return m, nil
+	}
+	view.loading = false
+	if msg.err != nil {
+		view.err = msg.err.Error()
+		view.report = ops.CleanupReport{}
+		view.items = nil
+		view.rows = nil
+		view.cursor = -1
+		return m, nil
+	}
+	view.err = ""
+	view.report = msg.report
+	view.applied = false
+	view.force = false
+	view.selected = map[cleanupItemKey]bool{}
+	m.state = m.state.rebuildCleanup()
+	for _, warning := range msg.report.Warnings {
+		m.state = m.state.addWarning(warning)
+	}
+	for _, text := range msg.report.Errors {
+		m.state = m.state.addError(text)
+	}
+	return m, nil
+}
+
+// cleanupAppliedMsg carries the report after ApplyCleanup. The report contains
+// every selected item's result; the preview is merged with it so the screen can
+// show removed, failed, and kept rows in place.
+type cleanupAppliedMsg struct {
+	report ops.CleanupReport
+	err    error
+}
+
+func applyCleanupCmd(ctx context.Context, cfg config.Config, report ops.CleanupReport) tea.Cmd {
+	return func() tea.Msg {
+		applied, err := ops.ApplyCleanup(ctx, cfg, report)
+		return cleanupAppliedMsg{report: applied, err: err}
+	}
+}
+
+func (m *Model) handleCleanupApplied(msg cleanupAppliedMsg) (*Model, tea.Cmd) {
+	view := m.state.cleanup
+	if view == nil {
+		if msg.err != nil {
+			m.state = m.state.addError("cleanup: " + msg.err.Error())
+		}
+		return m, m.refreshNow()
+	}
+	view.loading = false
+	view.applying = false
+	view.confirm = nil
+	if msg.err != nil {
+		view.err = msg.err.Error()
+		m.state = m.state.addError("cleanup: " + msg.err.Error())
+	} else {
+		view.err = ""
+	}
+	if !msg.report.Applied {
+		// ApplyCleanup refused before mutating anything (for example its Rex
+		// gate). Keep the preview and selection so the user can retry, and never
+		// claim a successful apply.
+		return m, m.refreshNow()
+	}
+	view.report = mergeCleanupResults(view.report, msg.report)
+	view.applied = true
+	view.selected = map[cleanupItemKey]bool{}
+	m.state = m.state.rebuildCleanup()
+	totals := msg.report.Totals
+	info := fmt.Sprintf("cleanup: %d removed, %d failed, %d kept", totals.Removed, totals.Failed, totals.Kept)
+	if retained := cleanupRetainedBranches(view.report); len(retained) > 0 {
+		info += fmt.Sprintf("; %d branch(es) retained", len(retained))
+	}
+	m.state = m.state.addInfo(info)
+	return m, m.refreshNow()
 }
 
 // removeSessionClosedMsg reports that the Rex session was closed.

@@ -260,6 +260,12 @@ func renderBody(s State, width, height int, t theme) string {
 		return renderRemoveModal(s, width, height, t)
 	case ModeNew:
 		return renderNewForm(s, width, height, t)
+	case ModeCleanup:
+		return renderCleanup(s, width, height, t)
+	case ModeCleanupDetail:
+		return renderCleanupDetail(s, width, height, t)
+	case ModeCleanupConfirm:
+		return renderCleanupConfirm(s, width, height, t)
 	}
 	if !s.haveConfig {
 		return renderLoading(width, height, t)
@@ -767,7 +773,7 @@ func renderFooter(s State, width int, t theme) string {
 	parts := footerParts(s, compact, t)
 	line := " " + strings.Join(parts, sep)
 	suffix := t.pendingText(footerSuffix(s))
-	optional := []string{"[s] status", "[n] new", "[d] remove", "[r] refresh", "[q] quit"}
+	optional := []string{"[s] status", "[n] new", "[d] remove", "[c] cleanup", "[r] refresh", "[q] quit"}
 
 	if !compact && suffix != "" {
 		// If the wide key bar cannot leave room for the right-aligned status,
@@ -850,6 +856,26 @@ func modalFooter(s State, width int, t theme) (string, bool) {
 		parts = []string{"[Tab] field", "[" + t.glyphs.arrowLeft + "/" + t.glyphs.arrowRight + "] project", "[Enter] create", "[Esc] cancel"}
 	case ModeHelp:
 		parts = []string{"[" + t.glyphs.arrowUp + t.glyphs.arrowDown + "] scroll", "[PgUp/PgDn] page", "[?/Esc] close"}
+	case ModeCleanup:
+		if s.cleanup != nil && s.cleanup.applying {
+			return " " + t.pendingText("applying…"), true
+		}
+		switch {
+		case s.cleanup != nil && s.cleanup.loading:
+			parts = []string{"[Esc] back"}
+		case s.cleanup != nil && s.cleanup.err != "" && len(s.cleanup.items) == 0:
+			parts = []string{"[r] retry", "[Esc] back"}
+		case compact:
+			parts = []string{"[sp] pick", "[f] force", "[r] rescan", "[Enter] review", "[Esc] back"}
+		default:
+			// The wide cleanup footer uses single spaces so rescan fits at 80.
+			sep = " "
+			parts = []string{"[Space] pick", "[a] safe", "[f] force", "[v] detail", "[r] rescan", "[Enter] review", "[Esc] back"}
+		}
+	case ModeCleanupDetail:
+		parts = []string{"[" + t.glyphs.arrowUp + t.glyphs.arrowDown + "] move", "[Space] select", "[f] force", "[v/Esc] close"}
+	case ModeCleanupConfirm:
+		parts = []string{"[y] apply", "[n/Esc] cancel"}
 	case ModeSearch:
 		return renderSearchBar(s, width, t), true
 	default:
@@ -1151,7 +1177,7 @@ func renderHelp(s State, width, height int, t theme) string {
 		" "+t.glyphs.arrowRight+"/l          expand / first child",
 		" "+t.glyphs.arrowLeft+"/h          back / collapse",
 		" space enter  toggle / switch",
-		" s n d r      status/new/remove/refresh",
+		" s n d r c    status/new/remove/refresh/cleanup",
 		" / ? q        search / help / quit",
 		" PgUp/PgDn    move one page",
 		" ctrl+u       clear query",

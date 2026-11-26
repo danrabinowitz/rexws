@@ -290,7 +290,7 @@ func TestEscPriorityAndFilterClear(t *testing.T) {
 }
 
 func TestCtrlCQuitsFromEveryMode(t *testing.T) {
-	for _, mode := range []Mode{ModeNormal, ModeSearch, ModeStatus, ModeHelp, ModeNew, ModeRemove, ModeFatal} {
+	for _, mode := range []Mode{ModeNormal, ModeSearch, ModeStatus, ModeHelp, ModeNew, ModeRemove, ModeFatal, ModeCleanup, ModeCleanupDetail, ModeCleanupConfirm} {
 		s := testState(t)
 		s.mode = mode
 		_, effects := Reduce(s, tea.KeyMsg{Type: tea.KeyCtrlC})

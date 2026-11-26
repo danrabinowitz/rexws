@@ -20,6 +20,9 @@ const (
 	ModeHelp
 	ModeNew
 	ModeFatal
+	ModeCleanup
+	ModeCleanupDetail
+	ModeCleanupConfirm
 )
 
 // RowKind is the level of a row. Group headers are not selectable.

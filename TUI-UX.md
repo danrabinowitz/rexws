@@ -316,6 +316,7 @@ Compact 60-column shape:
 | `s` | Open the status selector for the selected row's workstream |
 | `n` | New worktree flow |
 | `d` | Remove the selected row's workstream after pre-checks and confirmation |
+| `c` | Open the cleanup screen: preview candidates, grouped by risk, with no mutation until confirmation |
 | `r` | Refresh Git and Rex state; retry Rex/event connections |
 | `PgUp` / `PgDn` | Move the selection by one page |
 | `q` | Quit |
@@ -381,6 +382,9 @@ Modals capture keys before search or normal mode.
 | Remove confirmation | `y` or `Enter` confirm; `n` or `Esc` cancel |
 | Help | Scroll with `↑`/`↓`/`PgUp`/`PgDn`; `?` or `Esc` close |
 | New worktree | Form keys; `Enter` continue; `Esc` cancel; provider scripts via `tea.ExecProcess` |
+| Cleanup list | `Space` toggle selection; `a` toggle all safe; `f` toggle force; `v` detail; `Enter` review the selection (or detail with no selection); `r` rescan; `Esc` back; `PgUp`/`PgDn` move |
+| Cleanup detail | `j`/`k`, `↑`/`↓`, `PgUp`/`PgDn` move; `Space`/`a`/`f` as the list; `Enter` review; `v`/`Esc` close |
+| Cleanup confirmation | `y` apply; `n` or `Esc` cancel. `Enter` is ignored: it opened the review from the list, so a held or double-tapped `Enter` can never apply before the modal paints |
 
 Priority: **modal → search → normal**.
 
@@ -566,7 +570,81 @@ if it is pure and tested.
 - `r` refreshes Git and Rex state and retries event connections. It preserves
   query, expansion, and cursor by stable key.
 
-### 7.4 Error banner
+### 7.4 Cleanup
+
+`c` opens the cleanup screen. It previews every worktree and branch the CLI
+cleanup would classify, grouped by risk. Nothing is mutated until the
+confirmation step. Entry is refused with `Rex unavailable; press r to retry.`
+exactly like switch and remove: applying requires Rex so a live session cannot
+be missed. The plan is apply-capable (`Apply: true, Force: true`), so every
+dirty or unmerged item already carries its loss and action; the TUI's own force
+flag decides what may be selected and forwarded.
+
+Groups, mapped from `ops.CleanupItem`:
+
+- **Safe** — `Safe` is true: prunable records, merged branches, and
+  patch-equivalent branches. Selectable without force.
+- **Needs review** — `RequiresForce` is true (dirty worktree or unmerged
+  branch). The group header says `force required (f)`; the row's `[-]` marker
+  means the row is not currently selectable. Not selectable until `f` enables
+  force; turning force off deselects them.
+- **Blocked** — classification blocks removal (protected, locked, detached,
+  active, unknown) or the item has no action. Never selectable, with or without
+  force, and never forwarded to `ops.ApplyCleanup`.
+
+Each row shows project/branch (or the worktree path), classification, and the
+classification reason (`Detail`). The per-row detail (`v`, or `Enter` with no
+selection) shows kind, action, safe/removable/requires-force, branch state, the
+full reason, the exact loss for dirty/unmerged items, and any result or error.
+The orphan section is part of the same report but is not fixed here; use
+`rexws cleanup --fix` for stale `state.json` entries.
+
+Keys: `j`/`k` and arrows move (group headers are skipped), `Space` toggles,
+`a` toggles all safe, `f` toggles force, `v` opens detail, `Enter` opens review
+when something is selected (otherwise detail), `PgUp`/`PgDn` page, `r` rescans
+and discards the previous result, `Esc` returns to the dashboard.
+
+The confirmation modal names the exact count and actions: worktrees removed,
+branches deleted, prunable records pruned, items kept, retained branches (with
+names), each selected force-required item and its loss, warnings/errors, and
+the orphan count (`rexws cleanup --fix` handles orphans; this screen does not).
+`y` applies the snapshotted selection; `n` or `Esc` cancels. `Enter` does not
+apply: it is the key that opened the review from the list, so a held or
+double-tapped `Enter` is ignored here. The snapshot is built when the modal
+opens, so the applied report is exactly what was confirmed. A force selection
+also gets a headline loss summary (`Force: on - 2 force item(s): 2 changed
+path(s), 1 unmerged commit(s)`) that stays visible when the 60-column body
+clips; the body ends with an explicit `… N more line(s) not shown` marker
+instead of silently dropping lines. A refused apply (for example the Rex gate)
+keeps the preview and selection and is reported as an error, never as
+`Cleanup applied`.
+
+After apply the screen stays open with per-item `removed`/`failed`/`kept`
+results, the failed item's error in place of its reason, and the applied and
+retained totals. The dashboard refreshes in the background and warnings reach
+the banner. `r` rescans from scratch.
+
+States: scanning shows `Scanning cleanup…`; `Esc` closes the screen while a scan
+is in flight (a late result is discarded by scan token). An unreadable plan,
+including Rex unavailable, shows `Cleanup unavailable` with the error and
+`[r] retry  [Esc] back`; no candidates shows `No cleanup candidates.` Apply runs
+in a `tea.Cmd`, so the UI stays responsive; while an apply is in flight every
+key except `Ctrl+C` is ignored and the footer shows `applying…`. After apply the
+detail screen keeps a loss count summary at the top and ends clipped content
+with an explicit `… N more line(s) not shown` marker.
+
+At 60 columns the preview status line puts selection and force before the group
+counts (`sel 1 · force off · 2 safe · 1 review · 3 blocked`), so a long count
+cannot truncate the safety controls; applied results put the result counts and
+retained branches first. Rows use an 18-cell target and 11-cell classification.
+The compact footer is `[sp] pick [f] force [r] rescan [Enter] review [Esc] back`
+(`a` select-all-safe and `v` detail remain available and are listed above). At
+80 the full footer is `[Space] pick [a] safe [f] force [v] detail [r] rescan
+[Enter] review [Esc] back`, and the confirm footer is `[y] apply [n/Esc]
+cancel`. There is no mouse, no wrapped row, no configurable keybinding, and no
+scheduled cleanup.
+
+### 7.5 Error banner
 
 - Non-modal, one line above the footer. It never captures navigation keys.
 - **Conditions persist** (Rex state, stream health, ambiguity, project
@@ -838,8 +916,19 @@ If Rex becomes unavailable after data was loaded:
   set for every structural glyph, including expansion, groups, and rules.
 - [ ] Control characters in labels, warnings, or errors cannot reach the
   banner, header, or help, and cannot inject markers.
-- [ ] No new keybindings, no mouse, unchanged footer priority, unchanged 60×18
-  minimum, no wrapped rows.
+- [ ] The cleanup screen groups candidates as safe, needs review, and blocked,
+  shows each item's classification reason, and previews without mutating.
+- [ ] No cleanup mutation happens before the confirmation step; only `y`
+  applies, and a held or repeated `Enter` never does. The confirm names the
+  exact item/action counts, retained branches, force-required loss, warnings,
+  and orphans.
+- [ ] Blocked items are never selectable; force-required items are selectable
+  only after `f` enables force and are dropped when force is turned off.
+- [ ] Applying reports per-item `removed`/`failed`/`kept`, retained branches,
+  and warnings, then refreshes the dashboard without blocking input.
+- [ ] The cleanup list, detail, and confirm layouts fit at 60×18 and 80×24.
+- [ ] No configurable keybindings, no mouse, unchanged footer priority,
+  unchanged 60×18 minimum, no wrapped rows.
 - [ ] Unit tests cover visibility, sticky expansion, match spans, the key
   reducer, the cursor algorithm, sanitization, per-window badges, rendering at
   60/80/120/200 columns under fixed ASCII and truecolor profiles, the ANSI-16

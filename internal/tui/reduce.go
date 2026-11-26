@@ -20,6 +20,8 @@ type Effects struct {
 	PreflightRemove *RemoveRequest
 	ExecuteRemove   *ops.RemovePlan
 	Create          *CreateRequest
+	BeginCleanup    bool
+	ApplyCleanup    *ops.CleanupReport
 }
 
 // SwitchRequest selects a workstream's session or one of its windows.
@@ -67,6 +69,12 @@ func Reduce(state State, msg tea.KeyMsg) (State, Effects) {
 		return reduceHelp(state, msg)
 	case ModeNew:
 		return reduceNewForm(state, msg)
+	case ModeCleanup:
+		return reduceCleanup(state, msg)
+	case ModeCleanupDetail:
+		return reduceCleanupDetail(state, msg)
+	case ModeCleanupConfirm:
+		return reduceCleanupConfirm(state, msg)
 	case ModeSearch:
 		return reduceSearch(state, msg)
 	default:
@@ -119,6 +127,8 @@ func reduceNormal(s State, msg tea.KeyMsg) (State, Effects) {
 		return newKey(s), Effects{}
 	case isRune(msg, 'd'):
 		return removeKey(s)
+	case isRune(msg, 'c'):
+		return cleanupKey(s)
 	case isRune(msg, 'r'):
 		if s.pending || s.loading {
 			return s, Effects{}
@@ -442,4 +452,167 @@ func pageSize(s State) int {
 		size = 1
 	}
 	return size
+}
+
+// cleanupKey opens the cleanup screen. Applying cleanup requires Rex, so an
+// outage refuses the entry exactly like switch and remove do.
+func cleanupKey(s State) (State, Effects) {
+	if s.pending || s.loading || !s.haveConfig {
+		return s, Effects{}
+	}
+	if s.cleanup != nil && (s.cleanup.loading || s.cleanup.applying) {
+		return s, Effects{}
+	}
+	if !s.rexAvailable {
+		return s.addError("Rex unavailable; press r to retry."), Effects{}
+	}
+	// The token is monotonic across the whole State, not per view: closing and
+	// reopening during a scan must not reuse a token a stale result can match.
+	s.cleanupScanSeq++
+	s.cleanup = &cleanupView{
+		loading:  true,
+		token:    s.cleanupScanSeq,
+		selected: map[cleanupItemKey]bool{},
+	}
+	s.cleanup.confirm = nil
+	s.mode = ModeCleanup
+	return s, Effects{BeginCleanup: true}
+}
+
+func reduceCleanup(s State, msg tea.KeyMsg) (State, Effects) {
+	view := s.cleanup
+	if view == nil {
+		s.mode = ModeNormal
+		return s, Effects{}
+	}
+	if view.applying {
+		return s, Effects{}
+	}
+	if view.loading {
+		if msg.Type == tea.KeyEsc {
+			s.cleanup = nil
+			s.mode = ModeNormal
+		}
+		return s, Effects{}
+	}
+	switch {
+	case msg.Type == tea.KeyEsc:
+		s.cleanup = nil
+		s.mode = ModeNormal
+	case isRune(msg, 'r'):
+		return s.retryCleanup()
+	case isRune(msg, 'j'), msg.Type == tea.KeyDown:
+		return moveCleanupSelection(s, 1), Effects{}
+	case isRune(msg, 'k'), msg.Type == tea.KeyUp:
+		return moveCleanupSelection(s, -1), Effects{}
+	case msg.Type == tea.KeyPgDown:
+		return moveCleanupSelection(s, cleanupPageSize(s)), Effects{}
+	case msg.Type == tea.KeyPgUp:
+		return moveCleanupSelection(s, -cleanupPageSize(s)), Effects{}
+	case isSpace(msg):
+		return s.toggleCleanupSelection(), Effects{}
+	case isRune(msg, 'a'):
+		return s.toggleCleanupSelectAllSafe(), Effects{}
+	case isRune(msg, 'f'):
+		return s.toggleCleanupForce(), Effects{}
+	case isRune(msg, 'v'):
+		if _, ok := s.cleanupCurrent(); ok {
+			s.mode = ModeCleanupDetail
+		}
+		return s, Effects{}
+	case msg.Type == tea.KeyEnter:
+		if len(s.cleanup.selectedCleanupItems()) > 0 {
+			return s.openCleanupConfirm(), Effects{}
+		}
+		if _, ok := s.cleanupCurrent(); ok {
+			s.mode = ModeCleanupDetail
+		}
+		return s, Effects{}
+	}
+	return s, Effects{}
+}
+
+// retryCleanup starts a fresh preview and drops the previous result.
+func (s State) retryCleanup() (State, Effects) {
+	if s.cleanup == nil {
+		return s, Effects{}
+	}
+	s.cleanupScanSeq++
+	s.cleanup = s.cleanup.clone()
+	s.cleanup.token = s.cleanupScanSeq
+	s.cleanup.loading = true
+	s.cleanup.applying = false
+	s.cleanup.applied = false
+	s.cleanup.err = ""
+	s.cleanup.report = ops.CleanupReport{}
+	s.cleanup.items = nil
+	s.cleanup.rows = nil
+	s.cleanup.cursor = -1
+	s.cleanup.confirm = nil
+	s.cleanup.force = false
+	s.cleanup.selected = map[cleanupItemKey]bool{}
+	return s, Effects{BeginCleanup: true}
+}
+
+func reduceCleanupDetail(s State, msg tea.KeyMsg) (State, Effects) {
+	if s.cleanup == nil {
+		s.mode = ModeNormal
+		return s, Effects{}
+	}
+	if s.cleanup.applying || s.cleanup.loading {
+		return s, Effects{}
+	}
+	switch {
+	case msg.Type == tea.KeyEsc, isRune(msg, 'v'):
+		s.mode = ModeCleanup
+	case isRune(msg, 'j'), msg.Type == tea.KeyDown:
+		return moveCleanupSelection(s, 1), Effects{}
+	case isRune(msg, 'k'), msg.Type == tea.KeyUp:
+		return moveCleanupSelection(s, -1), Effects{}
+	case msg.Type == tea.KeyPgDown:
+		return moveCleanupSelection(s, cleanupPageSize(s)), Effects{}
+	case msg.Type == tea.KeyPgUp:
+		return moveCleanupSelection(s, -cleanupPageSize(s)), Effects{}
+	case isSpace(msg):
+		return s.toggleCleanupSelection(), Effects{}
+	case isRune(msg, 'a'):
+		return s.toggleCleanupSelectAllSafe(), Effects{}
+	case isRune(msg, 'f'):
+		return s.toggleCleanupForce(), Effects{}
+	case msg.Type == tea.KeyEnter:
+		if len(s.cleanup.selectedCleanupItems()) > 0 {
+			return s.openCleanupConfirm(), Effects{}
+		}
+	}
+	return s, Effects{}
+}
+
+func reduceCleanupConfirm(s State, msg tea.KeyMsg) (State, Effects) {
+	if s.cleanup == nil || s.cleanup.confirm == nil {
+		s.mode = ModeCleanup
+		return s, Effects{}
+	}
+	switch {
+	case msg.Type == tea.KeyEsc, isRune(msg, 'n'):
+		s.cleanup = s.cleanup.clone()
+		s.cleanup.confirm = nil
+		s.mode = ModeCleanup
+	case isRune(msg, 'y'):
+		// Only y applies. Enter opens the review from the list, so a held or
+		// double-tapped Enter must never reach the apply branch before the modal
+		// paints.
+		report := s.cleanup.confirm.report
+		s.cleanup = s.cleanup.clone()
+		s.cleanup.confirm = nil
+		s.cleanup.applying = true
+		s.mode = ModeCleanup
+		return s, Effects{ApplyCleanup: &report}
+	}
+	return s, Effects{}
+}
+
+// cleanupPageSize is the number of candidate rows in one cleanup page. The
+// status line occupies one row of the body.
+func cleanupPageSize(s State) int {
+	return max(1, s.bodyHeight()-1)
 }

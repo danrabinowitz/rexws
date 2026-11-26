@@ -67,13 +67,15 @@ type State struct {
 	build     BuildResult
 	rows      []Row
 
-	input      textinput.Model
-	status     *statusModal
-	remove     *removeModal
-	newForm    *newForm
-	helpOffset int
-	notices    []notice
-	noticeSeq  int
+	input          textinput.Model
+	status         *statusModal
+	remove         *removeModal
+	newForm        *newForm
+	cleanup        *cleanupView
+	cleanupScanSeq int
+	helpOffset     int
+	notices        []notice
+	noticeSeq      int
 
 	pending      bool
 	pendingLabel string
