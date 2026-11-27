@@ -14,6 +14,10 @@ your own workflow metadata, and stays out of the way.
 work; CI runs on every push to `main` and on pull requests, and there is no
 tagged release yet. See [Project status](#project-status).
 
+**Requirements:** Git 2.36 or newer (`git worktree list --porcelain -z`).
+`cleanup`'s patch-equivalence proof additionally requires Git 2.38 or newer
+(`git merge-tree --write-tree`).
+
 ---
 
 ## The problem
@@ -46,7 +50,7 @@ model — and there won't be.
 | Term | Meaning |
 | --- | --- |
 | **Project** | A Git repository registered in `config.json`. |
-| **Worktree** | A Git worktree discovered by `git worktree list --porcelain`. Git is the source of truth for what exists. |
+| **Worktree** | A Git worktree discovered by `git worktree list --porcelain -z`. Git is the source of truth for what exists. |
 | **Workstream** | `rexws`'s row for one worktree: project, branch, path, session label, workflow status and note, and the live Rex session, agents, and windows. **One worktree is one workstream.** It is not a Rex object or an Orca object. |
 | **Session** | A Rex session, one per workstream by convention, labeled `<project>/<branch>`. Rex owns it. |
 | **Window** | A Rex tab inside a session. A child of a workstream. Selecting a window by label or ID is supported; creating and closing windows from `rexws` is not. |
@@ -252,9 +256,8 @@ identity by construction; choose one with `path:`. `rexws here` uses the same
 containment rule for the current directory; see
 [Resolving the current workstream](#resolving-the-current-workstream).
 
-A worktree whose path cannot be resolved — missing, unreadable, behind a
-broken symlink, or containing a newline that `git worktree list --porcelain`
-cannot represent — is skipped instead of failing every selector or list.
+A worktree whose path cannot be resolved — missing, unreadable, or behind a
+broken symlink — is skipped instead of failing every selector or list.
 `list` and `here` always print a warning on stderr naming every skipped
 worktree's project and path, because both build the full workstream view;
 `list --json` also includes them in its `warnings` array. `switch` and `status`
@@ -273,9 +276,8 @@ prints the skipped-worktree warnings before the create-or-register hint, so the
 hint cannot hide them. `rm` never removes a workstream on a silently incomplete
 candidate set.
 
-A newline in a worktree path is a known limitation of the current porcelain
-parser; rexws reports that worktree as skipped and leaves the readable ones
-usable rather than failing every command.
+`git worktree list --porcelain -z` preserves a path containing a newline, so
+such a worktree is discovered, listed, and selectable like any other.
 
 Selector failures have stable exit codes so scripts can branch without parsing
 messages:

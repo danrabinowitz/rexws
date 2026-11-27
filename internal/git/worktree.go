@@ -1,17 +1,17 @@
-// Package git discovers worktrees with `git worktree list --porcelain`.
+// Package git discovers worktrees with `git worktree list --porcelain -z`.
 package git
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
-// Worktree is one record from `git worktree list --porcelain`.
+// Worktree is one record from `git worktree list --porcelain -z`.
 type Worktree struct {
 	Path     string
 	Head     string
@@ -22,40 +22,41 @@ type Worktree struct {
 	Prunable bool
 }
 
-// ParseWorktreeList parses porcelain output. Unknown attributes are ignored so
-// newer Git versions keep working with older rexws builds.
+// ParseWorktreeList parses `git worktree list --porcelain -z` output. Each
+// attribute is a NUL-terminated field, and an empty field ends a record. The
+// -z form leaves values unquoted, so a path containing a newline survives
+// intact. Unknown attributes are ignored so newer Git versions keep working
+// with older rexws builds.
 func ParseWorktreeList(data []byte) ([]Worktree, error) {
 	var (
 		worktrees []Worktree
 		current   *Worktree
 	)
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		line := strings.TrimSuffix(scanner.Text(), "\r")
-		if line == "" {
+	fieldNo := 0
+	for _, field := range bytes.Split(data, []byte{0}) {
+		if len(field) == 0 {
 			if current != nil {
 				worktrees = append(worktrees, *current)
 				current = nil
 			}
 			continue
 		}
+		fieldNo++
 
-		key, value, _ := strings.Cut(line, " ")
+		key, value, _ := strings.Cut(string(field), " ")
 		if key == "worktree" {
 			if current != nil {
-				return nil, fmt.Errorf("line %d: worktree record has no blank-line separator", lineNo)
+				return nil, fmt.Errorf("field %d: worktree record has no empty-field separator", fieldNo)
 			}
 			if value == "" {
-				return nil, fmt.Errorf("line %d: worktree path is empty", lineNo)
+				return nil, fmt.Errorf("field %d: worktree path is empty", fieldNo)
 			}
 			current = &Worktree{Path: value}
 			continue
 		}
 		if current == nil {
-			return nil, fmt.Errorf("line %d: %q appears before the worktree path", lineNo, key)
+			return nil, fmt.Errorf("field %d: %q appears before the worktree path", fieldNo, key)
 		}
 
 		switch key {
@@ -73,22 +74,68 @@ func ParseWorktreeList(data []byte) ([]Worktree, error) {
 			current.Prunable = true
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("parse worktree list: %w", err)
-	}
 	if current != nil {
 		worktrees = append(worktrees, *current)
 	}
 	return worktrees, nil
 }
 
-// ListWorktrees runs `git worktree list --porcelain` in repoPath.
+// worktreeListZMajor and worktreeListZMinor are the first Git release whose
+// `worktree list` supports -z.
+const (
+	worktreeListZMajor = 2
+	worktreeListZMinor = 36
+)
+
+// ListWorktrees runs `git worktree list --porcelain -z` in repoPath.
 func ListWorktrees(ctx context.Context, repoPath string) ([]Worktree, error) {
-	out, err := runGit(ctx, repoPath, "worktree", "list", "--porcelain")
+	out, err := runGit(ctx, repoPath, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
-		return nil, err
+		return nil, explainWorktreeListError(ctx, repoPath, err)
 	}
 	return ParseWorktreeList(out)
+}
+
+// explainWorktreeListError adds an actionable requirement when the installed
+// Git predates -z, instead of leaving only "unknown option 'z'".
+func explainWorktreeListError(ctx context.Context, repoPath string, err error) error {
+	major, minor, ok := gitVersion(ctx, repoPath)
+	if !ok || major > worktreeListZMajor ||
+		(major == worktreeListZMajor && minor >= worktreeListZMinor) {
+		return err
+	}
+	return fmt.Errorf("%w; rexws requires Git 2.36 or newer for `git worktree list --porcelain -z`", err)
+}
+
+// gitVersion reads the running Git's major and minor version.
+func gitVersion(ctx context.Context, repoPath string) (major, minor int, ok bool) {
+	out, err := runGit(ctx, repoPath, "version")
+	if err != nil {
+		return 0, 0, false
+	}
+	return parseGitVersion(string(out))
+}
+
+// parseGitVersion accepts `git version 2.36.0` and vendor variants such as
+// `git version 2.39.5 (Apple Git-154)`.
+func parseGitVersion(out string) (major, minor int, ok bool) {
+	fields := strings.Fields(strings.TrimSpace(out))
+	if len(fields) < 3 || fields[0] != "git" || fields[1] != "version" {
+		return 0, 0, false
+	}
+	parts := strings.Split(fields[2], ".")
+	if len(parts) < 2 {
+		return 0, 0, false
+	}
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, false
+	}
+	minor, err = strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, false
+	}
+	return major, minor, true
 }
 
 // ProjectRoot resolves any path inside a repository or its worktrees to the

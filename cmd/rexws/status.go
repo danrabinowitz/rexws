@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/danrabinowitz/rexws/internal/ops"
+	"github.com/danrabinowitz/rexws/internal/render"
 )
 
 func newStatusCmd() *cobra.Command {
@@ -41,7 +42,7 @@ func newStatusCmd() *cobra.Command {
 					UpdatedAt:           change.UpdatedAt,
 				})
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s is now %s\n", change.Path, change.Label)
+			fmt.Fprintf(cmd.OutOrStdout(), "%s is now %s\n", render.Sanitize(change.Path), change.Label)
 			return nil
 		},
 	}

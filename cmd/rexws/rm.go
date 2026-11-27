@@ -106,7 +106,7 @@ func newRmCmd() *cobra.Command {
 				}
 			}
 
-			fmt.Fprintf(providerOut, "Removing %s (%s)\n", plan.SessionName, plan.Path)
+			fmt.Fprintf(providerOut, "Removing %s (%s)\n", plan.SessionName, render.Sanitize(plan.Path))
 
 			result, err := ops.ExecuteRemove(cmd.Context(), cfg, plan, cmd.InOrStdin(), providerOut, cmd.ErrOrStderr())
 			if err != nil {

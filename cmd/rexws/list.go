@@ -72,7 +72,7 @@ func newListCmd() *cobra.Command {
 			fmt.Fprintln(writer, "PROJECT\tBRANCH\tSTATUS\tAGENT\tSESSION\tPATH")
 			for _, ws := range workstreams {
 				fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n",
-					ws.Project, ws.Branch, ws.WorkflowStatusLabel, render.Default.Format(ws), shortSession(ws.RexSessionID), ws.Path)
+					ws.Project, ws.Branch, ws.WorkflowStatusLabel, render.Default.Format(ws), shortSession(ws.RexSessionID), render.Sanitize(ws.Path))
 			}
 			return writer.Flush()
 		},

@@ -494,8 +494,8 @@ func isExplicitPathSelector(input string) bool {
 }
 
 // sanitizeWarnings makes skipped-worktree warnings safe to print in a
-// terminal. A path may contain control bytes, including the newline that makes
-// the porcelain parser produce a skipped candidate in the first place.
+// terminal. A skipped path may contain control bytes, which the -z porcelain
+// parser preserves rather than replacing with a record boundary.
 func sanitizeWarnings(warnings []string) []string {
 	if len(warnings) == 0 {
 		return nil

@@ -767,3 +767,43 @@ func TestExecuteRemoveWarnsWhenProviderDeletesBranch(t *testing.T) {
 	}
 	_ = targetPath
 }
+
+// TestPrepareRemoveNewlinePathWorktree proves a worktree whose path contains a
+// newline resolves through rm planning and the direct re-list used after a
+// provider runs. The provider is a no-op, so the worktree must survive.
+func TestPrepareRemoveNewlinePathWorktree(t *testing.T) {
+	repo := testRepo(t)
+	root := filepath.Join(t.TempDir(), "worktrees")
+	cfg := testConfig(t, repo, root)
+	target := filepath.Join(root, "feat", "line\nbreak")
+	gitRun(t, repo, "worktree", "add", "-q", "-b", "feat/newline", target)
+	targetPath := canonical(t, target)
+	emptyRex(t)
+
+	plan, err := PrepareRemove(context.Background(), cfg, "path:"+target)
+	if err != nil {
+		t.Fatalf("PrepareRemove(path:): %v", err)
+	}
+	if plan.Path != targetPath || plan.Branch != "feat/newline" {
+		t.Fatalf("plan = %#v, want the newline worktree %q", plan, targetPath)
+	}
+
+	cfg.Providers["fake"] = config.Provider{Remove: []string{"sh", "-c", "true"}}
+	cfg.Projects[0].Provider = "fake"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	plan, err = PrepareRemove(context.Background(), cfg, targetPath)
+	if err != nil {
+		t.Fatalf("PrepareRemove(literal path): %v", err)
+	}
+
+	var stdout, stderr strings.Builder
+	if _, err := ExecuteRemove(context.Background(), cfg, plan, nil, &stdout, &stderr); err == nil ||
+		!strings.Contains(err.Error(), "did not remove worktree") {
+		t.Fatalf("err = %v, want the provider verification failure", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("preparing or executing removed the worktree: %v", err)
+	}
+}

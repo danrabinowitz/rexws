@@ -9,6 +9,7 @@ import (
 	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/core"
 	"github.com/danrabinowitz/rexws/internal/ops"
+	"github.com/danrabinowitz/rexws/internal/render"
 )
 
 func newHereCmd() *cobra.Command {
@@ -66,10 +67,10 @@ func newHereCmd() *cobra.Command {
 			writer := newTabWriter(cmd)
 			fmt.Fprintf(writer, "project\t%s\n", workstream.Project)
 			fmt.Fprintf(writer, "branch\t%s\n", workstream.Branch)
-			fmt.Fprintf(writer, "path\t%s\n", workstream.Path)
+			fmt.Fprintf(writer, "path\t%s\n", render.Sanitize(workstream.Path))
 			fmt.Fprintf(writer, "session\t%s\n", workstream.SessionName)
 			fmt.Fprintf(writer, "status\t%s\n", workstream.WorkflowStatusLabel)
-			fmt.Fprintf(writer, "selector\t%s\n", selector)
+			fmt.Fprintf(writer, "selector\t%s\n", render.Sanitize(selector))
 			return writer.Flush()
 		},
 	}

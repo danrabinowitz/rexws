@@ -179,7 +179,7 @@ Important details:
   `internal/ops`.
 - `internal/config` — config/state load/save, configurable statuses, provider
   definitions, Rex binary/client settings.
-- `internal/git` — `git worktree list --porcelain` parsing, branch/dirty checks.
+- `internal/git` — `git worktree list --porcelain -z` parsing, branch/dirty checks.
 - `internal/core` — merges worktrees, state, and Rex sessions into Workstreams;
   agent/window models and labels.
 - `internal/rex` — Rex CLI adapter: sessions, program status, windows, events,

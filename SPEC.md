@@ -15,7 +15,7 @@ rexws/
 ├── cmd/rexws/main.go   # Cobra CLI; the root command launches the TUI
 └── internal/
     ├── config/         # config.json & state.json, statuses, style validation
-    ├── git/            # Worktree discovery (`git worktree list --porcelain`)
+    ├── git/            # Worktree discovery (`git worktree list --porcelain -z`)
     ├── provider/       # Pluggable worktree command templates (git, wt, custom)
     ├── rex/            # Rex CLI adapter and `rex events --json` parser
     ├── core/           # Merges Git + Rex + State into Workstream structs
@@ -251,7 +251,7 @@ intentionally does not duplicate either.
 
 All of the planned implementation phases have shipped on `main`:
 
-1. **Core + CLI:** config/state loader, `git worktree list --porcelain` parser, `project add`, `status`, `list` (table and JSON).
+1. **Core + CLI:** config/state loader, `git worktree list --porcelain -z` parser, `project add`, `status`, `list` (table and JSON).
 2. **Rex Adapter:** session listing, per-pane program status, event parsing, and `switch` for sessions and windows.
 3. **Pluggable Providers:** template-based providers for `new` and `rm`, including the built-in `git` provider and the safe-remove path.
 4. **TUI:** the accordion hierarchy inside status groups, live streams, substring search, status switcher, cleanup view, and `tea.ExecProcess` handoff for `new`/`rm`.
