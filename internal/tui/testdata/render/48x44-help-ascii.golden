@@ -1,0 +1,44 @@
+ REXWS  [4 ws - 3 live]                         
+------------------------------------------------
+ +- Help -------------------------------------+ 
+ |  Markers                                   | 
+ |  > selected    * active window             | 
+ |  >v collapsed/expanded                     | 
+ |  > context  ? unknown  - none              | 
+ |  !   ambiguous session binding             | 
+ |  ||   live updates paused for this session | 
+ |  !|  both                                  | 
+ |  x   dismiss the newest action error       | 
+ |  Keys                                      | 
+ |  j/k, v/^     move selection               | 
+ |  >/l          expand / first child         | 
+ |  </h          back / collapse              | 
+ |  space enter  toggle / switch              | 
+ |  s n d r  status/new/remove/refresh        | 
+ |  c  cleanup                                | 
+ |  / ? q        search / help / quit         | 
+ |  PgUp/PgDn    move one page                | 
+ |  ctrl+u       clear query                  | 
+ |  ctrl+n/p     move selection               | 
+ |  ctrl+c       quit                         | 
+ |  esc          clear filter / close modal   | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ |                                            | 
+ +--------------------------------------------+ 
+ [^v] scroll [PgUp/PgDn] page [?/Esc] close     

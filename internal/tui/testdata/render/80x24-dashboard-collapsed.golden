@@ -1,0 +1,24 @@
+ REXWS  [4 workstreams · 3 live · 2 agent-blocked]                              
+────────────────────────────────────────────────────────────────────────────────
+ ▌ IN PROGRESS (2)                                                              
+ > ▸ rexws         m1-m2-core-rex         blocked (permission) ×1, wo…    2 tabs
+   ▸ do-si-do      refactor-sync          blocked (permission)             1 tab
+ ▌ BLOCKED (1)                                                                  
+   ▸ monorepo      sparse-api-v2          idle                            3 tabs
+ ▌ READY (1)                                                                    
+     .ai           main                   stopped                               
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+ [Enter] switch  [→] expand  [←] back  [/] filter  [?] help  [s] status  [n] new

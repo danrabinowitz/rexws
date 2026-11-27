@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/danrabinowitz/rexws/internal/git"
 	"github.com/danrabinowitz/rexws/internal/ops"
@@ -1126,4 +1127,145 @@ func TestRenderCleanupDetailLossBeforeError(t *testing.T) {
 	if !strings.Contains(out, "2 changed/untracked/ignored path(s)") {
 		t.Errorf("applied-failure loss summary was clipped:\n%s", out)
 	}
+}
+
+func TestRenderCleanupNarrowList48(t *testing.T) {
+	setProfile(t, termenv.Ascii)
+	setGlyphs(t, false)
+	s := cleanupRenderState(t, 48, 18)
+	out := Render(s)
+	lines := assertScreen(t, out, 48, 18)
+	plain := stripANSI(out)
+
+	// The status is two lines so selection and force stay visible.
+	if !strings.Contains(plain, "Cleanup  sel 0 · force off") {
+		t.Errorf("48-column status line 1 missing:\n%s", plain)
+	}
+	if !strings.Contains(plain, "2 safe · 2 review · 2 blocked") {
+		t.Errorf("48-column status line 2 missing:\n%s", plain)
+	}
+
+	// Row cells are exact: gutter/selection 1+2, check 4, target 14, gap 2,
+	// class 9, gap 2, reason 14.
+	row := lines[lineIndexContaining(t, lines, "rexws/f")]
+	if got := lipgloss.Width(row); got != 48 {
+		t.Errorf("cleanup row is %d cells, want 48: %q", got, row)
+	}
+	for _, want := range []string{"[ ]", "rexws/f", "merged", "branch is an"} {
+		if !strings.Contains(row, want) {
+			t.Errorf("cleanup row missing %q: %q", want, row)
+		}
+	}
+
+	footer := strings.TrimRight(stripANSI(lines[len(lines)-1]), " ")
+	for _, want := range []string{"[sp] pick", "[f] force", "[Enter] review", "[Esc] back"} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("48-column cleanup footer missing %q: %q", want, footer)
+		}
+	}
+	if strings.Contains(footer, "[r] rescan") {
+		t.Errorf("48-column cleanup footer kept the rescan key: %q", footer)
+	}
+}
+
+func TestRenderCleanupNarrowApplied48(t *testing.T) {
+	setProfile(t, termenv.Ascii)
+	setGlyphs(t, false)
+	s := cleanupRenderState(t, 48, 44)
+	report := s.cleanup.report
+	report.Applied = true
+	report.Totals = ops.CleanupTotals{Removed: 1, Kept: 5}
+	report.Projects[0].Items[0].Result = ops.CleanupResultRemoved
+	for i := 1; i < len(report.Projects[0].Items); i++ {
+		report.Projects[0].Items[i].Result = ops.CleanupResultKept
+	}
+	s.cleanup = s.cleanup.clone()
+	s.cleanup.report = report
+	s.cleanup.applied = true
+	s = s.rebuildCleanup()
+
+	out := Render(s)
+	lines := assertScreen(t, out, 48, 44)
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "Cleanup applied") {
+		t.Errorf("applied label missing:\n%s", plain)
+	}
+	row := lines[lineIndexContaining(t, lines, "rexws/f")]
+	if !strings.Contains(row, "removed") {
+		t.Errorf("applied row did not put the result in the class cell: %q", row)
+	}
+	if strings.Contains(row, "merged") {
+		t.Errorf("applied row still shows the classification: %q", row)
+	}
+	if got := lipgloss.Width(row); got != 48 {
+		t.Errorf("applied row is %d cells, want 48: %q", got, row)
+	}
+}
+
+func TestRenderCleanupNarrowDetail48(t *testing.T) {
+	setProfile(t, termenv.Ascii)
+	setGlyphs(t, false)
+	s := cleanupRenderState(t, 48, 44)
+	s = cleanupCursorTo(s, 2) // dirty item, whose Safe line overflows
+	s.mode = ModeCleanupDetail
+	out := Render(s)
+	assertScreen(t, out, 48, 44)
+
+	border := lineContaining(t, out, "╭─ Cleanup detail")
+	start := strings.Index(border, "╭")
+	end := strings.LastIndex(border, "╮")
+	if start < 0 || end < 0 {
+		t.Fatalf("detail border missing: %q", border)
+	}
+	if got := lipgloss.Width(border[start : end+len("╮")]); got != 46 {
+		t.Errorf("48-column detail box = %d cells, want 46: %q", got, border)
+	}
+	plain := stripANSI(out)
+	for _, want := range []string{"Kind:", "Classification:", "Action:", "Safe:", "Removable:", "Requires", "force:", "Selection:", "enable"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("48-column detail missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+func TestRenderCleanupNarrowConfirm48(t *testing.T) {
+	setProfile(t, termenv.Ascii)
+	setGlyphs(t, false)
+	s := cleanupRenderState(t, 48, 44)
+	s, _ = Reduce(s, runeKey('a'))
+	s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyEnter})
+	out := Render(s)
+	assertScreen(t, out, 48, 44)
+
+	border := lineContaining(t, out, "╭─ Apply cleanup")
+	start := strings.Index(border, "╭")
+	end := strings.LastIndex(border, "╮")
+	if start < 0 || end < 0 {
+		t.Fatalf("confirm border missing: %q", border)
+	}
+	if got := lipgloss.Width(border[start : end+len("╮")]); got != 46 {
+		t.Errorf("48-column confirm box = %d cells, want 46: %q", got, border)
+	}
+	plain := stripANSI(out)
+	for _, want := range []string{
+		"Apply cleanup to 2 item(s)?",
+		"Will remove: 1 worktree(s), delete 2",
+		"branch(es), prune 0 record(s).",
+		"Kept: 4 item(s); 4 branch(es) retained.",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("48-column confirm missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+func lineIndexContaining(t *testing.T, lines []string, want string) int {
+	t.Helper()
+	for i, line := range lines {
+		if strings.Contains(line, want) {
+			return i
+		}
+	}
+	t.Fatalf("no line contains %q:\n%s", want, strings.Join(lines, "\n"))
+	return -1
 }

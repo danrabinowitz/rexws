@@ -1,0 +1,18 @@
+ REXWS  [4 ws · 3 live]                         
+────────────────────────────────────────────────
+ ╭─ Help ─────────────────────────────────────╮ 
+ │  Markers                                   │ 
+ │  > selected    * active window             │ 
+ │  ▸▾ collapsed/expanded                     │ 
+ │  ↳ context  ? unknown  — none              │ 
+ │  !   ambiguous session binding             │ 
+ │  ‖   live updates paused for this session  │ 
+ │  !‖  both                                  │ 
+ │  x   dismiss the newest action error       │ 
+ │  Keys                                      │ 
+ │  j/k, ↓/↑     move selection               │ 
+ │  →/l          expand / first child         │ 
+ │  ←/h          back / collapse              │ 
+ │  space enter  toggle / switch              │ 
+ ╰────────────────────────────────────────────╯ 
+ [↑↓] scroll [PgUp/PgDn] page [?/Esc] close     

@@ -121,6 +121,76 @@ func TestRender60Columns(t *testing.T) {
 	}
 }
 
+func TestRender48Columns(t *testing.T) {
+	setProfile(t, termenv.Ascii)
+	setGlyphs(t, false)
+	s := renderState(t, 48, 18)
+	out := Render(s)
+	lines := assertScreen(t, out, 48, 18)
+
+	if strings.Contains(out, "terminal too small") {
+		t.Fatalf("48x18 showed the too-small screen:\n%s", out)
+	}
+	header := strings.TrimRight(lines[0], " ")
+	if !strings.Contains(header, "REXWS") || !strings.Contains(header, "[4 ws · 3 live]") {
+		t.Errorf("48-column header = %q", header)
+	}
+	for _, want := range []string{"IN PROGRESS (2)", "BLOCKED (1)", "READY (1)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("48-column dashboard missing %q:\n%s", want, out)
+		}
+	}
+	// The project column stays; the branch keeps its documented minimum.
+	parent := lineContaining(t, out, "m1-m2-core-rex")
+	if !strings.Contains(parent, "rexws") {
+		t.Errorf("48-column parent dropped the project column: %q", parent)
+	}
+	if !strings.Contains(parent, "> ▸ rexws") {
+		t.Errorf("48-column selection/tree cell missing: %q", parent)
+	}
+	footer := stripANSI(lines[len(lines)-1])
+	for _, want := range []string{"[Enter] switch", "[→] expand", "[/] filter", "[?] help"} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("48-column footer missing %q: %q", want, footer)
+		}
+	}
+}
+
+func TestRender48ModalFooters(t *testing.T) {
+	setProfile(t, termenv.Ascii)
+	setGlyphs(t, false)
+
+	t.Run("status", func(t *testing.T) {
+		s := renderState(t, 48, 18)
+		s, _ = Reduce(s, runeKey('s'))
+		lines := assertScreen(t, Render(s), 48, 18)
+		footer := strings.TrimRight(stripANSI(lines[len(lines)-1]), " ")
+		for _, want := range []string{"[↑↓] move", "[Enter] apply", "[Esc] cancel"} {
+			if !strings.Contains(footer, want) {
+				t.Errorf("48-column status footer missing %q: %q", want, footer)
+			}
+		}
+		if strings.Contains(footer, "[1-9]") {
+			t.Errorf("48-column status footer kept the shortcut key: %q", footer)
+		}
+	})
+
+	t.Run("new", func(t *testing.T) {
+		s := renderState(t, 48, 18)
+		s, _ = Reduce(s, runeKey('n'))
+		lines := assertScreen(t, Render(s), 48, 18)
+		footer := strings.TrimRight(stripANSI(lines[len(lines)-1]), " ")
+		for _, want := range []string{"[Tab] field", "[Enter] create", "[Esc] cancel"} {
+			if !strings.Contains(footer, want) {
+				t.Errorf("48-column new footer missing %q: %q", want, footer)
+			}
+		}
+		if strings.Contains(footer, "project") {
+			t.Errorf("48-column new footer kept the project key: %q", footer)
+		}
+	})
+}
+
 func TestRenderStoppedWorkstreamHasNoChevron(t *testing.T) {
 	s := renderState(t, 80, 24)
 	out := Render(s)
@@ -143,7 +213,8 @@ func TestRenderStoppedWorkstreamHasNoChevron(t *testing.T) {
 
 func TestRenderTerminalTooSmall(t *testing.T) {
 	s := renderState(t, 59, 17)
-	if out := Render(s); !strings.Contains(out, "terminal too small") {
+	out := Render(s)
+	if !strings.Contains(out, "terminal too small") || !strings.Contains(out, "need 48x18, have 59x17") {
 		t.Errorf("out = %q", out)
 	}
 }
@@ -230,6 +301,24 @@ func TestRenderFatal(t *testing.T) {
 	out := Render(s)
 	if !strings.Contains(out, "bad field") || !strings.Contains(out, "[r] retry") {
 		t.Errorf("fatal screen missing:\n%s", out)
+	}
+}
+
+func TestRenderFatalHintWrapsAt48(t *testing.T) {
+	setProfile(t, termenv.Ascii)
+	setGlyphs(t, false)
+	s := renderState(t, 48, 24)
+	s.mode = ModeFatal
+	s.fatalKind = "config"
+	s.fatalErr = errors.New("parse /tmp/config.json: bad field")
+	out := Render(s)
+	assertScreen(t, out, 48, 24)
+	plain := stripANSI(out)
+	// The full hint keeps its trailing period by wrapping instead of clipping.
+	for _, want := range []string{"rexws list shows the same error", "TUI.", "[r] retry", "[q] quit"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("48-column fatal screen missing %q:\n%s", want, plain)
+		}
 	}
 }
 

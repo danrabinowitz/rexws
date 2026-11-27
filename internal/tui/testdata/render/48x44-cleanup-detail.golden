@@ -1,0 +1,44 @@
+ REXWS  [4 ws · 3 live]                         
+────────────────────────────────────────────────
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+ ╭─ Cleanup detail ───────────────────────────╮ 
+ │ rexws/feat/dirty                           │ 
+ │                                            │ 
+ │ Kind: worktree   Classification: dirty     │ 
+ │ Action: remove-worktree-and-branch         │ 
+ │ Safe: no Removable: yes Requires force:    │ 
+ │ yes                                        │ 
+ │ Branch state: merged                       │ 
+ │ Selection: force required; press f to      │ 
+ │ enable                                     │ 
+ │ Loss: 2 changed/untracked/ignored path(s)  │ 
+ │                                            │ 
+ │ Reason:                                    │ 
+ │  uncommitted, untracked, or ignored        │ 
+ │  changes: 2 changed paths                  │ 
+ │                                            │ 
+ │ Loss detail:                               │ 
+ │   2 changed, untracked, or ignored path(s) │ 
+ │      M a.txt                               │ 
+ │     ?? b.txt                               │ 
+ ╰────────────────────────────────────────────╯ 
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+ [Space] select [f] force [v/Esc] close         

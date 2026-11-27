@@ -28,7 +28,7 @@ func Render(s State) string {
 		terminalHeight = 24
 	}
 	t := currentTheme()
-	if terminalWidth < 60 || terminalHeight < 18 {
+	if terminalWidth < 48 || terminalHeight < 18 {
 		return renderTooSmall(t, terminalWidth, terminalHeight)
 	}
 
@@ -83,7 +83,7 @@ func frame(out string, width, terminalWidth int) string {
 
 func renderTooSmall(t theme, width, height int) string {
 	block := "terminal too small\n" +
-		t.muted().Render(fmt.Sprintf("need 60x18, have %dx%d", width, height))
+		t.muted().Render(fmt.Sprintf("need 48x18, have %dx%d", width, height))
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, block)
 }
 
@@ -97,6 +97,10 @@ func renderFatal(s State, width, height int, t theme) []string {
 		file = "state.json"
 	}
 	prose := max(1, min(width, 100)-1)
+	if width < 60 {
+		// The 48-column tier wraps fatal prose two cells inside its frame.
+		prose = max(1, width-2)
+	}
 	ellipsis := t.glyphs.ellipsis
 
 	head := []string{
@@ -110,8 +114,16 @@ func renderFatal(s State, width, height int, t theme) []string {
 	for _, line := range wrapText(remedy, prose) {
 		tail = append(tail, " "+line)
 	}
+	hint := "rexws list shows the same error outside the TUI."
+	if width < 60 {
+		// At 48 the prefixed hint is 49 cells; wrap it so the period survives.
+		for _, line := range wrapText(hint, prose) {
+			tail = append(tail, " "+t.muted().Render(line))
+		}
+	} else {
+		tail = append(tail, " "+t.muted().Render(hint))
+	}
 	tail = append(tail,
-		" "+t.muted().Render("rexws list shows the same error outside the TUI."),
 		"",
 		" [r] retry  [q] quit",
 	)
@@ -169,7 +181,8 @@ func renderHeader(s State, width int, t theme) string {
 		counts = countsChip(s, width, t)
 	}
 
-	// Sacrifice order is counts, then query width; health is never truncated.
+	// Sacrifice order is counts, then query width, then the whole filter chip;
+	// health is never truncated.
 	// Build the query first so a long query keeps its room at 80 columns.
 	chipFixed := lipgloss.Width("  filter: ") + lipgloss.Width(" "+t.glyphs.times)
 	nonQuery := lipgloss.Width(" "+brand) + lipgloss.Width(healthPart)
@@ -179,15 +192,19 @@ func renderHeader(s State, width int, t theme) string {
 		line += "  filter: " + query + " " + t.glyphs.times
 	}
 	line += healthPart
-	if lipgloss.Width(line) > width && query != "" {
-		available := width - nonQuery - chipFixed
-		if available < 1 {
-			query = ""
-			line = " " + brand + healthPart
-		} else {
-			query = truncate(query, available)
-			line = " " + brand + "  filter: " + query + " " + t.glyphs.times + healthPart
-		}
+	// Apply the four-cell usefulness bound even when the built line happens to
+	// fit exactly: at 48 a long health token leaves one cell for the query,
+	// which is not worth a chip.
+	available := width - nonQuery - chipFixed
+	if query != "" && available < 4 {
+		// Drop the whole chip rather than render a `filter: … ×` sliver.
+		// Four query cells is the smallest useful amount; at >=60 the
+		// minimum available is 13, so this bound cannot trigger there.
+		query = ""
+		line = " " + brand + healthPart
+	} else if query != "" && lipgloss.Width(line) > width {
+		query = truncate(query, available)
+		line = " " + brand + "  filter: " + query + " " + t.glyphs.times + healthPart
 	}
 
 	if counts != "" {
@@ -353,6 +370,10 @@ type grid struct {
 func newGrid(rows []Row, width int) grid {
 	g := grid{project: 10, badge: 18}
 	switch {
+	case width < 60:
+		// The 48-59 tier reclaims the badge rail instead of dropping the
+		// project column: project 10, badge 13.
+		g.project, g.badge = 10, 13
 	case width >= 120:
 		g.project, g.badge, g.showCount, g.count = 16, 28, true, 8
 	case width >= 80:
@@ -376,7 +397,12 @@ func newGrid(rows []Row, width int) grid {
 		}
 		maxLabel = max(maxLabel, label)
 	}
-	g.label = max(12, min(maxLabel, 24))
+	labelCap := 24
+	if width < 60 {
+		// A long label cannot evict the app cell at 48; it truncates at 16.
+		labelCap = 16
+	}
+	g.label = max(12, min(maxLabel, labelCap))
 
 	childFixed := 12 + g.label + g.badge
 	if g.showCount {
@@ -818,16 +844,17 @@ func renderFooter(s State, width int, t theme) string {
 	}
 	if suffix != "" {
 		styled := t.info().Bold(true).Render(suffix)
+		// At the 48-59 tier a pending suffix needs room. Drop whole keys from
+		// the end (help, then filter/clear, then expand) until it fits. The
+		// first part, [Enter] switch, is never dropped. This is a no-op at
+		// >=60, where the longest suffix always fits after at most help.
+		for lipgloss.Width(line)+lipgloss.Width(sep)+lipgloss.Width(suffix) > width && len(parts) > 1 {
+			parts = parts[:len(parts)-1]
+			line = " " + strings.Join(parts, sep)
+		}
 		candidate := line + sep + suffix
 		if lipgloss.Width(candidate) <= width {
 			line += sep + styled
-		} else {
-			// Keep the active action visible on the compact footer; the help
-			// key is the least urgent priority key to give up.
-			trimmed := strings.TrimSuffix(line, sep+"[?] help")
-			if plain := trimmed + sep + suffix; lipgloss.Width(plain) <= width {
-				line = trimmed + sep + styled
-			}
 		}
 	}
 	return fitWidth(line, width)
@@ -862,10 +889,17 @@ func modalFooter(s State, width int, t theme) (string, bool) {
 	switch s.mode {
 	case ModeStatus:
 		parts = []string{"[" + t.glyphs.arrowUp + t.glyphs.arrowDown + "] move", "[1-9] shortcut", "[Enter] apply", "[Esc] cancel"}
+		if width < 60 {
+			parts = []string{"[" + t.glyphs.arrowUp + t.glyphs.arrowDown + "] move", "[Enter] apply", "[Esc] cancel"}
+		}
 	case ModeRemove:
 		parts = []string{"[y/Enter] confirm", "[n/Esc] cancel"}
 	case ModeNew:
 		parts = []string{"[Tab] field", "[" + t.glyphs.arrowLeft + "/" + t.glyphs.arrowRight + "] project", "[Enter] create", "[Esc] cancel"}
+		if width < 60 {
+			// The form prints (←/→) beside Project, so the key is redundant.
+			parts = []string{"[Tab] field", "[Enter] create", "[Esc] cancel"}
+		}
 	case ModeHelp:
 		parts = []string{"[" + t.glyphs.arrowUp + t.glyphs.arrowDown + "] scroll", "[PgUp/PgDn] page", "[?/Esc] close"}
 	case ModeCleanup:
@@ -877,6 +911,8 @@ func modalFooter(s State, width int, t theme) (string, bool) {
 			parts = []string{"[Esc] back"}
 		case s.cleanup != nil && s.cleanup.err != "" && len(s.cleanup.items) == 0:
 			parts = []string{"[r] retry", "[Esc] back"}
+		case compact && width < 60:
+			parts = []string{"[sp] pick", "[f] force", "[Enter] review", "[Esc] back"}
 		case compact:
 			parts = []string{"[sp] pick", "[f] force", "[r] rescan", "[Enter] review", "[Esc] back"}
 		default:
@@ -886,10 +922,13 @@ func modalFooter(s State, width int, t theme) (string, bool) {
 		}
 	case ModeCleanupDetail:
 		parts = []string{"[" + t.glyphs.arrowUp + t.glyphs.arrowDown + "] move", "[Space] select", "[f] force", "[v/Esc] close"}
+		if width < 60 {
+			parts = []string{"[Space] select", "[f] force", "[v/Esc] close"}
+		}
 	case ModeCleanupConfirm:
 		parts = []string{"[y] apply", "[n/Esc] cancel"}
 	case ModeSearch:
-		return renderSearchBar(s, width, t), true
+		return renderSearchBar(s, width), true
 	default:
 		return "", false
 	}
@@ -909,21 +948,43 @@ func footerSuffix(s State) string {
 	return ""
 }
 
-func renderSearchBar(s State, width int, t theme) string {
-	arrows := t.glyphs.arrowUp + t.glyphs.arrowDown
-	keys := "   [" + arrows + "] move  [Enter] accept  [Esc] clear"
-	if width < 80 {
-		keys = " [" + arrows + "] move [Enter] accept [Esc] clear"
+// searchPrompt is the search input's prompt. The render bar and the model
+// reserve the same cells for it.
+const searchPrompt = " Search: "
+
+// searchKeys returns the search bar's key hint for a terminal width. At the
+// 48-59 tier the move key is omitted so the input keeps at least 10 cells.
+func searchKeys(width int) string {
+	arrows := currentGlyphs().arrowUp + currentGlyphs().arrowDown
+	switch {
+	case width < 60:
+		return " [Enter] accept [Esc] clear"
+	case width < 80:
+		return " [" + arrows + "] move [Enter] accept [Esc] clear"
+	default:
+		return "   [" + arrows + "] move  [Enter] accept  [Esc] clear"
 	}
+}
+
+// searchInputWidth returns the search input's content width. The rendered bar
+// and the model's cursor offsets must both use it, or the cursor can sit one
+// cell off at the narrow tiers.
+func searchInputWidth(width int) int {
+	keysWidth := lipgloss.Width(searchKeys(width))
+	promptWidth := lipgloss.Width(searchPrompt)
+	// Reserve one cell for the cursor and one for the overflow slack that
+	// handleOverflow allows; SetValue below recomputes the cached offsets.
+	return max(1, width-keysWidth-promptWidth-2)
+}
+
+func renderSearchBar(s State, width int) string {
+	keys := searchKeys(width)
 	input := s.input
 	if asciiMode() {
 		input.Cursor.SetChar("|")
 	}
 	keysWidth := lipgloss.Width(keys)
-	promptWidth := lipgloss.Width(input.Prompt)
-	// Reserve one cell for the cursor and one for the overflow slack that
-	// handleOverflow allows; SetValue below recomputes the cached offsets.
-	input.Width = max(1, width-keysWidth-promptWidth-2)
+	input.Width = searchInputWidth(width)
 	input.SetValue(input.Value())
 	view := fitWidth(input.View(), max(1, width-keysWidth))
 	return fitWidth(view+keys, width)
@@ -1120,6 +1181,10 @@ func renderNewForm(s State, width, height int, t theme) string {
 
 func modalBoxMetrics(width int) (boxWidth, contentWidth int) {
 	boxWidth = min(width-6, 64)
+	if width < 60 {
+		// The 48-column tier uses the full frame minus its two-cell gutter.
+		boxWidth = min(width-2, 64)
+	}
 	if boxWidth < 20 {
 		boxWidth = max(1, width-2)
 	}
@@ -1193,6 +1258,34 @@ func renderHelp(s State, width, height int, t theme) string {
 	lines = append(lines,
 		" Markers",
 		" > selected    * active window",
+	)
+	if width < 60 {
+		// Split the overlong legend and key rows so the 46-cell box ends every
+		// line rather than clipping it.
+		lines = append(lines,
+			" "+t.glyphs.collapsed+t.glyphs.expanded+" collapsed/expanded",
+			" "+t.glyphs.context+" context  ? unknown  "+t.glyphs.empty+" none",
+			" "+t.glyphs.ambiguous+"   ambiguous session binding",
+			" "+t.glyphs.paused+"   live updates paused for this session",
+			" "+t.glyphs.both+"  both",
+			" x   dismiss the newest action error",
+			" Keys",
+			" j/k, "+t.glyphs.arrowDown+"/"+t.glyphs.arrowUp+"     move selection",
+			" "+t.glyphs.arrowRight+"/l          expand / first child",
+			" "+t.glyphs.arrowLeft+"/h          back / collapse",
+			" space enter  toggle / switch",
+			" s n d r  status/new/remove/refresh",
+			" c  cleanup",
+			" / ? q        search / help / quit",
+			" PgUp/PgDn    move one page",
+			" ctrl+u       clear query",
+			" ctrl+n/p     move selection",
+			" ctrl+c       quit",
+			" esc          clear filter / close modal",
+		)
+		return renderHelpBox("Help", lines, boxWidth, width, height, t, s.helpOffset)
+	}
+	lines = append(lines,
 		" "+t.glyphs.collapsed+t.glyphs.expanded+" collapsed/expanded  "+t.glyphs.context+" context  ? unknown  "+t.glyphs.empty+" none",
 		" "+t.glyphs.ambiguous+"   ambiguous session binding",
 		" "+t.glyphs.paused+"   live updates paused for this session",
@@ -1215,6 +1308,8 @@ func renderHelp(s State, width, height int, t theme) string {
 
 func helpBoxMetrics(width int) (boxWidth, contentWidth int) {
 	switch {
+	case width < 60:
+		boxWidth = 46
 	case width < 80:
 		boxWidth = 56
 	case width < 120:

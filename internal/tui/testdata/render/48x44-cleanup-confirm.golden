@@ -1,0 +1,44 @@
+ REXWS  [4 ws · 3 live]                         
+────────────────────────────────────────────────
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+ ╭─ Apply cleanup ────────────────────────────╮ 
+ │ Apply cleanup to 2 item(s)?                │ 
+ │ Warnings/errors: 1                         │ 
+ │  orphan scan incomplete                    │ 
+ │                                            │ 
+ │ Will remove: 1 worktree(s), delete 2       │ 
+ │ branch(es), prune 0 record(s).             │ 
+ │ Kept: 4 item(s); 4 branch(es) retained.    │ 
+ │ Retained branches: rexws/feat/active, rex… │ 
+ │                                            │ 
+ │ This removes the selected worktrees,       │ 
+ │ deletes the selected branches, and prunes  │ 
+ │ missing-worktree records. Unselected items │ 
+ │ are not changed.                           │ 
+ │                                            │ 
+ │ Force: off; dirty and unmerged items       │ 
+ │ cannot be selected.                        │ 
+ │                                            │ 
+ │ Items:                                     │ 
+ │   remove worktree /wt/safe and delete bra… │ 
+ │   delete branch rexws/feat/merged          │ 
+ ╰────────────────────────────────────────────╯ 
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+ [y] apply [n/Esc] cancel                       

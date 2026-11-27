@@ -81,7 +81,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.state.width = msg.Width
 		m.state.height = msg.Height
-		m.state.input.Width = max(10, msg.Width-40)
+		m.state.input.Width = searchInputWidth(msg.Width)
 		m.state = m.state.ensureCursorVisible()
 		return m, nil
 
