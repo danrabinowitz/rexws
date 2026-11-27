@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -604,10 +605,10 @@ func reduceCleanupConfirm(s State, msg tea.KeyMsg) (State, Effects) {
 		s.cleanup = s.cleanup.clone()
 		s.cleanup.confirm = nil
 		s.mode = ModeCleanup
-	case isRune(msg, 'y'):
-		// Only y applies. Enter opens the review from the list, so a held or
-		// double-tapped Enter must never reach the apply branch before the modal
-		// paints.
+	case !msg.Paste && isRune(msg, 'y'):
+		// Only an actual y applies. Enter opens the review from the list, so a
+		// held or double-tapped Enter must never reach the apply branch before
+		// the modal paints; a pasted y is not a deliberate confirmation either.
 		report := s.cleanup.confirm.report
 		s.cleanup = s.cleanup.clone()
 		s.cleanup.confirm = nil
@@ -618,8 +619,14 @@ func reduceCleanupConfirm(s State, msg tea.KeyMsg) (State, Effects) {
 	return s, Effects{}
 }
 
-// cleanupPageSize is the number of candidate rows in one cleanup page. The
-// status line occupies one row of the body.
+// cleanupPageSize is the number of candidate rows in one cleanup page. It
+// matches the list height the renderer shows, including the persistent error
+// line after a refused apply.
 func cleanupPageSize(s State) int {
-	return max(1, s.bodyHeight()-1)
+	_, hasErrLine := cleanupRefusedError(s, time.Now())
+	fixed := 1 // status line
+	if hasErrLine {
+		fixed++
+	}
+	return max(1, s.bodyHeight()-fixed)
 }

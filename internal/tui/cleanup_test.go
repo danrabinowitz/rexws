@@ -4,8 +4,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/danrabinowitz/rexws/internal/git"
 	"github.com/danrabinowitz/rexws/internal/ops"
@@ -524,6 +526,49 @@ func TestRenderCleanupConfirm(t *testing.T) {
 				t.Errorf("%dx%d confirm missing %q:\n%s", size.width, size.height, want, out)
 			}
 		}
+		if size.width == 60 {
+			// The body clips at the minimum size; the marker must say so instead
+			// of dropping the tail silently.
+			marker := currentGlyphs().ellipsis + " "
+			if !strings.Contains(out, marker) || !strings.Contains(out, "more line(s) not shown") {
+				t.Errorf("%dx%d confirm missing truncation marker:\n%s", size.width, size.height, out)
+			}
+		}
+	}
+}
+
+func TestRenderCleanupConfirmHeadlineWarningsAndOrphansAt60(t *testing.T) {
+	s := cleanupRenderState(t, 60, 18)
+	s.cleanup.report.Orphans.Items = make([]ops.CleanupOrphan, 3)
+	s = s.rebuildCleanup()
+	s, _ = Reduce(s, runeKey('a'))
+	s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyEnter})
+	out := Render(s)
+	assertScreen(t, out, 60, 18)
+	// Warnings, errors, and the orphan count join the headline so the 60-column
+	// body cut cannot hide them. The exact counts and retained branches stay
+	// visible ahead of the explanatory prose.
+	for _, want := range []string{"Warnings/errors: 1", "orphan scan incomplete", "Orphans: 3", "rexws cleanup --fix", "Kept:", "Retained branches:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("60x18 confirm headline missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderCleanupConfirmLongWarningAt60(t *testing.T) {
+	s := cleanupRenderState(t, 60, 18)
+	s.cleanup.report.Warnings[0] = "orphan scan incomplete: " + strings.Repeat("a long warning ", 12)
+	s = s.rebuildCleanup()
+	s, _ = Reduce(s, runeKey('a'))
+	s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyEnter})
+	out := Render(s)
+	assertScreen(t, out, 60, 18)
+	// A long warning is clamped to one line so it cannot push the exact counts
+	// past the cut.
+	for _, want := range []string{"Warnings/errors: 1", "Kept:", "Retained branches:", currentGlyphs().ellipsis, "more line(s) not shown"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("60x18 long-warning confirm missing %q:\n%s", want, out)
+		}
 	}
 }
 
@@ -644,7 +689,7 @@ func TestRenderCleanupConfirmForceSummaryAt60(t *testing.T) {
 	s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyEnter})
 	out := Render(s)
 	assertScreen(t, out, 60, 18)
-	for _, want := range []string{"Force: on - 2 force item(s)", "2 changed path(s)", "unmerged commit(s)"} {
+	for _, want := range []string{"Force: on - 2 force item(s)", "2 changed path(s)", "unmerged commit(s)", "Kept:", "Retained branches:"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("60x18 force summary missing %q:\n%s", want, out)
 		}
@@ -826,5 +871,259 @@ func TestRenderCleanupDetailShowsLossSummaryAndTruncation(t *testing.T) {
 				t.Errorf("%dx%d detail missing %q:\n%s", size.width, size.height, want, out)
 			}
 		}
+	}
+}
+
+// cleanupAppliedStatusState builds the applied-results state used by the
+// status-line tests: one removed item, one failed item, and unselected items
+// that stay retained.
+func cleanupAppliedStatusState(t *testing.T) State {
+	t.Helper()
+	s := cleanupRenderState(t, 60, 18)
+	s, _ = Reduce(s, runeKey('a'))
+	s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyEnter})
+	report := s.cleanup.confirm.report
+	report.Applied = true
+	report.Projects[0].Items[0].Result = ops.CleanupResultRemoved
+	report.Projects[0].Items[1].Result = ops.CleanupResultFailed
+	report.Projects[0].Items[1].Error = "branch moved; kept"
+	report.Totals = ops.CleanupTotals{Removed: 1, Failed: 1, Kept: 0}
+	s.cleanup.applied = true
+	s.cleanup.report = mergeCleanupResults(s.cleanup.report, report)
+	s.cleanup.selected = map[cleanupItemKey]bool{}
+	s.cleanup.confirm = nil
+	s.mode = ModeCleanup
+	return s.rebuildCleanup()
+}
+
+func TestCleanupAppliedStatusOrderAt60(t *testing.T) {
+	s := cleanupAppliedStatusState(t)
+	line := cleanupStatusLine(s.cleanup, 60, currentTheme())
+	prev := -1
+	for _, want := range []string{"1 removed", "1 failed", "0 kept", "retained"} {
+		at := strings.Index(line, want)
+		if at < 0 {
+			t.Fatalf("60-column applied status missing %q: %q", want, line)
+		}
+		if at <= prev {
+			t.Errorf("applied status out of order at %q: %q", want, line)
+		}
+		prev = at
+	}
+}
+
+func TestCleanupAppliedStatusMarksHardCutAt60(t *testing.T) {
+	s := cleanupAppliedStatusState(t)
+	// Push the applied line past 60 cells so the status must truncate.
+	s.cleanup.report.Orphans.Items = make([]ops.CleanupOrphan, 12)
+	line := cleanupStatusLine(s.cleanup, 60, currentTheme())
+	if !strings.Contains(line, currentGlyphs().ellipsis) {
+		t.Errorf("hard-cut applied status has no ellipsis: %q", line)
+	}
+	if got := lipgloss.Width(line); got > 60 {
+		t.Errorf("applied status = %d cells, want <= 60: %q", got, line)
+	}
+}
+
+func TestCleanupConfirmIgnoresPastedY(t *testing.T) {
+	s := cleanupTestState(t)
+	s, _ = Reduce(s, runeKey('a'))
+	s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyEnter})
+	pasted := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}, Paste: true}
+	s, effects := Reduce(s, pasted)
+	if effects.ApplyCleanup != nil || s.mode != ModeCleanupConfirm {
+		t.Fatalf("pasted y applied: mode %v effects %#v", s.mode, effects)
+	}
+	s, effects = Reduce(s, runeKey('y'))
+	if effects.ApplyCleanup == nil {
+		t.Fatalf("typed y did not apply: %#v", effects)
+	}
+}
+
+func TestRenderCleanupRefusedApplyKeepsPersistentError(t *testing.T) {
+	s := cleanupTestState(t)
+	s, _ = Reduce(s, runeKey('a'))
+	s.cleanup.applying = true
+	s.mode = ModeCleanup
+
+	m := NewModel()
+	defer m.Close()
+	m.state = s
+	m.handleCleanupApplied(cleanupAppliedMsg{
+		report: cleanupTestReport(), // Applied=false
+		err:    errors.New("cannot verify live Rex sessions before applying"),
+	})
+
+	// While the transient banner is visible it owns the message.
+	out := Render(m.state)
+	assertScreen(t, out, 80, 24)
+	if got := strings.Count(out, "cannot verify live Rex sessions before applying"); got != 1 {
+		t.Errorf("error appears %d times while the banner is visible:\n%s", got, out)
+	}
+
+	// Once the notice expires, the screen keeps a persistent error line.
+	m.state = m.state.pruneNotices(time.Now().Add(10 * time.Second))
+	out = Render(m.state)
+	assertScreen(t, out, 80, 24)
+	if !strings.Contains(out, "cannot verify live Rex sessions before applying") {
+		t.Errorf("refused apply error disappeared after the banner expired:\n%s", out)
+	}
+}
+
+func TestCleanupPageSizeReservesPersistentError(t *testing.T) {
+	s := cleanupTestState(t)
+	s, _ = Reduce(s, runeKey('a'))
+	s.cleanup.applying = true
+	s.mode = ModeCleanup
+
+	m := NewModel()
+	defer m.Close()
+	m.state = s
+	m.handleCleanupApplied(cleanupAppliedMsg{
+		report: cleanupTestReport(), // Applied=false
+		err:    errors.New("cannot verify live Rex sessions before applying"),
+	})
+	m.state = m.state.pruneNotices(time.Now().Add(10 * time.Second))
+	m.state.width, m.state.height = 60, 18
+
+	_, hasErrLine := cleanupRefusedError(m.state, time.Now())
+	fixed := 1
+	if hasErrLine {
+		fixed++
+	}
+	visible := m.state.bodyHeight() - fixed
+	page := cleanupPageSize(m.state)
+	if page > visible {
+		t.Errorf("page size %d exceeds visible list height %d", page, visible)
+	}
+	if page < 1 {
+		t.Errorf("page size = %d", page)
+	}
+}
+
+func TestCleanupMoveThenToggleKeepsPriorSelection(t *testing.T) {
+	s := cleanupTestState(t)
+	moved := moveCleanupSelection(s, 1)
+	if moved.cleanup.cursor == s.cleanup.cursor {
+		t.Fatal("move did not advance the cursor")
+	}
+	// The shallow copy shares the selection map; a toggle must clone before
+	// writing so neither earlier state sees the change.
+	toggled, _ := Reduce(moved, tea.KeyMsg{Type: tea.KeySpace})
+	if len(s.cleanup.selected) != 0 || len(moved.cleanup.selected) != 0 {
+		t.Errorf("toggle mutated a shared selection map: before=%d moved=%d", len(s.cleanup.selected), len(moved.cleanup.selected))
+	}
+	if len(toggled.cleanup.selected) != 1 {
+		t.Errorf("selection was not applied to the copy: %#v", toggled.cleanup.selected)
+	}
+}
+
+func TestCleanupFooterStates(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*cleanupView)
+		want   []string
+		absent []string
+	}{
+		{
+			name:   "wide",
+			mutate: func(*cleanupView) {},
+			want:   []string{"[r] rescan", "[v] detail", "[Space] pick"},
+		},
+		{
+			name:   "loading",
+			mutate: func(v *cleanupView) { v.loading = true },
+			want:   []string{"[Esc] back"},
+			absent: []string{"[r] rescan", "[v] detail"},
+		},
+		{
+			name:   "error",
+			mutate: func(v *cleanupView) { v.err = "boom"; v.items = nil; v.rows = nil },
+			want:   []string{"[r] retry", "[Esc] back"},
+		},
+		{
+			name:   "applying",
+			mutate: func(v *cleanupView) { v.applying = true },
+			want:   []string{"applying"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := cleanupRenderState(t, 80, 24)
+			tc.mutate(s.cleanup)
+			line, ok := modalFooter(s, 80, currentTheme())
+			if !ok {
+				t.Fatalf("no footer for %s", tc.name)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(line, want) {
+					t.Errorf("footer missing %q: %q", want, line)
+				}
+			}
+			for _, absent := range tc.absent {
+				if strings.Contains(line, absent) {
+					t.Errorf("footer has %q: %q", absent, line)
+				}
+			}
+		})
+	}
+}
+
+func TestCleanupApplyDeduplicatesWarnings(t *testing.T) {
+	s := cleanupTestState(t)
+	s, _ = Reduce(s, runeKey('a'))
+	s, _ = Reduce(s, tea.KeyMsg{Type: tea.KeyEnter})
+	confirmed := s.cleanup.confirm.report
+	confirmed.Applied = true
+	// The preview warning is re-reported and a new warning is added. The merge
+	// must keep one copy of the shared warning.
+	confirmed.Warnings = []string{"orphan scan incomplete", "branch moved during apply"}
+	confirmed.Errors = []string{"same error"}
+	s.cleanup.report.Errors = []string{"same error"}
+	confirmed.Totals = ops.CleanupTotals{Removed: 2}
+
+	m := NewModel()
+	defer m.Close()
+	m.state = s
+	m.handleCleanupApplied(cleanupAppliedMsg{report: confirmed})
+
+	warnings := map[string]int{}
+	for _, warning := range m.state.cleanup.report.Warnings {
+		warnings[warning]++
+	}
+	if warnings["orphan scan incomplete"] != 1 {
+		t.Errorf("preview warning was duplicated: %v", m.state.cleanup.report.Warnings)
+	}
+	if warnings["branch moved during apply"] != 1 {
+		t.Errorf("applied warning was lost or duplicated: %v", m.state.cleanup.report.Warnings)
+	}
+	errs := map[string]int{}
+	for _, text := range m.state.cleanup.report.Errors {
+		errs[text]++
+	}
+	if errs["same error"] != 1 {
+		t.Errorf("shared error was duplicated: %v", m.state.cleanup.report.Errors)
+	}
+	if _, ok := tuiNotice(m.state, "2 removed"); !ok {
+		t.Errorf("success notice missing: %#v", m.state.notices)
+	}
+}
+
+func TestRenderCleanupDetailLossBeforeError(t *testing.T) {
+	s := cleanupRenderState(t, 60, 18)
+	s.cleanup.report.Projects[0].Items[2].Result = ops.CleanupResultFailed
+	s.cleanup.report.Projects[0].Items[2].Error = "worktree changed after planning; kept"
+	s = s.rebuildCleanup()
+	s = cleanupCursorTo(s, 2)
+	s.mode = ModeCleanupDetail
+	out := Render(s)
+	assertScreen(t, out, 60, 18)
+	lossAt := strings.Index(out, "Loss:")
+	errAt := strings.Index(out, "Error:")
+	if lossAt < 0 || errAt < 0 || lossAt > errAt {
+		t.Errorf("Loss summary is not before Error (loss=%d error=%d):\n%s", lossAt, errAt, out)
+	}
+	if !strings.Contains(out, "2 changed/untracked/ignored path(s)") {
+		t.Errorf("applied-failure loss summary was clipped:\n%s", out)
 	}
 }

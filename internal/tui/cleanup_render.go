@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
@@ -15,7 +16,7 @@ import (
 // renderCleanup draws the cleanup list: a fixed status line plus a scrolling
 // group-and-candidate list. It is a screen, not a modal, so the dashboard
 // header and footer frame stay in place.
-func renderCleanup(s State, width, height int, t theme) string {
+func renderCleanup(s State, width, height int, t theme, now time.Time) string {
 	view := s.cleanup
 	if view == nil {
 		return centerBlock([]string{"Cleanup unavailable."}, width, height)
@@ -32,7 +33,12 @@ func renderCleanup(s State, width, height int, t theme) string {
 
 	status := cleanupStatusLine(view, width, t)
 	rows := renderCleanupRows(view, width, t)
-	bodyHeight := max(0, height-1)
+	fixed := 1
+	errText, hasErrLine := cleanupRefusedError(s, now)
+	if hasErrLine {
+		fixed++
+	}
+	bodyHeight := max(0, height-fixed)
 	if bodyHeight == 0 {
 		return fitWidth(status, width)
 	}
@@ -50,7 +56,33 @@ func renderCleanup(s State, width, height int, t theme) string {
 	pane := viewport.New(width, bodyHeight)
 	pane.SetContent(strings.Join(rows, "\n"))
 	pane.SetYOffset(top)
-	return strings.Join([]string{fitWidth(status, width), pane.View()}, "\n")
+	lines := []string{fitWidth(status, width)}
+	if hasErrLine {
+		lines = append(lines, renderCleanupErrorLine(errText, width, t))
+	}
+	lines = append(lines, pane.View())
+	return strings.Join(lines, "\n")
+}
+
+// cleanupRefusedError returns a refused apply's error once its transient banner
+// is no longer visible. The error then stays as a fixed line on the cleanup
+// screen instead of disappearing with the notice.
+func cleanupRefusedError(s State, now time.Time) (string, bool) {
+	view := s.cleanup
+	if view == nil || view.err == "" || len(view.items) == 0 {
+		return "", false
+	}
+	text := "cleanup: " + view.err
+	for _, n := range s.visibleNotices(now) {
+		if n.text == text {
+			return "", false
+		}
+	}
+	return view.err, true
+}
+
+func renderCleanupErrorLine(text string, width int, t theme) string {
+	return t.error().Render(truncate(" Error: "+render.Sanitize(text), width))
 }
 
 func renderCleanupLoading(width, height int, t theme) string {
@@ -135,7 +167,24 @@ func cleanupStatusLine(view *cleanupView, width int, t theme) string {
 		label = "Cleanup applied"
 	}
 	line := " " + t.accent().Bold(true).Render(label) + "  " + t.muted().Render(strings.Join(parts, " · "))
-	return fitWidth(line, width)
+	return fitStatusLine(line, width, t)
+}
+
+// fitStatusLine truncates the fixed status line and marks a hard cut with the
+// glyph set's ellipsis, so a narrow terminal never hides that content was
+// dropped.
+func fitStatusLine(text string, width int, t theme) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(text) <= width {
+		return text
+	}
+	ellipsis := t.glyphs.ellipsis
+	if width <= lipgloss.Width(ellipsis) {
+		return fitWidth(ellipsis, width)
+	}
+	return fitWidth(text, width-lipgloss.Width(ellipsis)) + ellipsis
 }
 
 func renderCleanupRows(view *cleanupView, width int, t theme) []string {
@@ -275,16 +324,17 @@ func renderCleanupDetail(s State, width, height int, t theme) string {
 	if job.Result != "" {
 		lines = append(lines, "Result: "+render.Sanitize(string(job.Result)))
 	}
+	if job.Loss != nil {
+		// The counts are the always-visible loss summary and stay above Error,
+		// so an applied failure cannot clip them on a short terminal; the
+		// per-path and per-commit detail follows the reason.
+		lines = append(lines, wrapText("Loss: "+cleanupLossCounts(job.Loss), contentWidth)...)
+	}
 	if job.Error != "" {
 		lines = append(lines, "", t.error().Render("Error:"))
 		for _, line := range wrapText(render.Sanitize(job.Error), contentWidth) {
 			lines = append(lines, " "+line)
 		}
-	}
-	if job.Loss != nil {
-		// The counts are the always-visible loss summary; the per-path and
-		// per-commit detail may be clipped on a short terminal.
-		lines = append(lines, wrapText("Loss: "+cleanupLossCounts(job.Loss), contentWidth)...)
 	}
 	lines = append(lines, "", "Reason:")
 	for _, line := range wrapText(render.Sanitize(job.Detail), contentWidth) {
@@ -358,7 +408,7 @@ func cleanupLossLines(loss *ops.CleanupLoss, width int) []string {
 	if loss == nil {
 		return nil
 	}
-	lines := []string{"", "Loss:"}
+	lines := []string{"", "Loss detail:"}
 	if len(loss.DirtyFiles) > 0 {
 		lines = append(lines, fmt.Sprintf("  %d changed, untracked, or ignored path(s):", len(loss.DirtyFiles)))
 		lines = append(lines, limitedLines(loss.DirtyFiles, 5, "    ", width)...)
@@ -420,12 +470,16 @@ func renderCleanupConfirm(s State, width, height int, t theme) string {
 		}
 		lines = append(lines, wrapText(summary, contentWidth)...)
 	}
-	lines = append(lines, "")
-	for _, line := range wrapText(
-		"This removes the selected worktrees, deletes the selected branches, and prunes missing-worktree records. Unselected items are not changed.",
-		contentWidth,
-	) {
-		lines = append(lines, line)
+	// Warnings, errors, and the orphan count are part of the headline too: at
+	// 60 columns the body clips, and neither may be silently dropped.
+	if len(confirm.warnings) > 0 {
+		lines = append(lines, wrapText(fmt.Sprintf("Warnings/errors: %d", len(confirm.warnings)), contentWidth)...)
+		// One truncated line keeps a long warning from pushing the action and
+		// retained counts past the 60-column cut.
+		lines = append(lines, " "+truncate(render.Sanitize(confirm.warnings[0]), max(1, contentWidth-1)))
+	}
+	if orphans := len(view.report.Orphans.Items); orphans > 0 {
+		lines = append(lines, wrapText(fmt.Sprintf("Orphans: %d (rexws cleanup --fix handles them)", orphans), contentWidth)...)
 	}
 	lines = append(lines, "")
 	lines = append(lines, wrapText(fmt.Sprintf(
@@ -436,6 +490,15 @@ func renderCleanupConfirm(s State, width, height int, t theme) string {
 	if len(confirm.retainedBranches) > 0 {
 		names := strings.Join(previewNames(confirm.retainedBranches, 3), ", ") + moreNames(confirm.retainedBranches, 3)
 		lines = append(lines, truncate(render.Sanitize("Retained branches: "+names), contentWidth))
+	}
+	// The exact action and retained counts sit ahead of the explanatory prose,
+	// so the 60-column clip cannot hide what y will do.
+	lines = append(lines, "")
+	for _, line := range wrapText(
+		"This removes the selected worktrees, deletes the selected branches, and prunes missing-worktree records. Unselected items are not changed.",
+		contentWidth,
+	) {
+		lines = append(lines, line)
 	}
 
 	if len(confirm.forceItems) == 0 {
@@ -456,16 +519,6 @@ func renderCleanupConfirm(s State, width, height int, t theme) string {
 			lines = append(lines, truncate(text, contentWidth))
 		}
 	}
-	if len(confirm.warnings) > 0 {
-		lines = append(lines, "", fmt.Sprintf("Warnings/errors: %d", len(confirm.warnings)))
-		for _, line := range wrapText(render.Sanitize(confirm.warnings[0]), contentWidth) {
-			lines = append(lines, " "+line)
-		}
-	}
-	if orphans := len(view.report.Orphans.Items); orphans > 0 {
-		lines = append(lines, "", fmt.Sprintf("Orphans: %d reported; rexws cleanup --fix handles them (not changed here).", orphans))
-	}
-
 	lines = append(lines, "", "Items:")
 	shown := 0
 	total := 0

@@ -184,6 +184,19 @@ func (v *cleanupView) clone() *cleanupView {
 	return &copied
 }
 
+// withCleanupCursor returns a copy of the view whose cursor points at row. It
+// copies only the view struct, so callers must not mutate the shared items,
+// rows, selection, or confirm through the result; selection changes still go
+// through clone.
+func (v *cleanupView) withCleanupCursor(cursor int) *cleanupView {
+	if v == nil {
+		return nil
+	}
+	copied := *v
+	copied.cursor = cursor
+	return &copied
+}
+
 // rebuildCleanup recomputes rows and clamps the cursor after a report or
 // selection change.
 func (s State) rebuildCleanup() State {
@@ -262,8 +275,9 @@ func moveCleanupSelection(s State, delta int) State {
 	}
 	for i := cursor; i >= 0 && i < len(s.cleanup.rows); i += direction {
 		if s.cleanup.rows[i].Kind == cleanupRowItem {
-			s.cleanup = s.cleanup.clone()
-			s.cleanup.cursor = i
+			// Only the cursor changes, so a shallow copy is enough and leaves
+			// the caller's rows and selection untouched.
+			s.cleanup = s.cleanup.withCleanupCursor(i)
 			return s
 		}
 	}
@@ -271,8 +285,7 @@ func moveCleanupSelection(s State, delta int) State {
 	// group). Scan the other way so the edge candidate is still reachable.
 	for i := cursor; i >= 0 && i < len(s.cleanup.rows); i -= direction {
 		if s.cleanup.rows[i].Kind == cleanupRowItem {
-			s.cleanup = s.cleanup.clone()
-			s.cleanup.cursor = i
+			s.cleanup = s.cleanup.withCleanupCursor(i)
 			return s
 		}
 	}

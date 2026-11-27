@@ -39,7 +39,10 @@ func Render(s State) string {
 
 	header := renderHeader(s, width, t)
 	separator := strings.Repeat(t.glyphs.rule, width)
-	notice, hasNotice := renderNotice(s, width, t)
+	// One clock read per frame keeps the notice banner and the cleanup error
+	// line in agreement at the expiry boundary.
+	now := time.Now()
+	notice, hasNotice := renderNotice(s, width, t, now)
 	bodyHeight := terminalHeight - 3
 	if hasNotice {
 		bodyHeight--
@@ -48,7 +51,7 @@ func Render(s State) string {
 		bodyHeight = 0
 	}
 
-	body := renderBody(s, width, bodyHeight, t)
+	body := renderBody(s, width, bodyHeight, t, now)
 	footer := renderFooter(s, width, t)
 
 	lines := []string{header, separator, body}
@@ -227,8 +230,8 @@ func countsChip(s State, width int, t theme) string {
 		muted.Render("]")
 }
 
-func renderNotice(s State, width int, t theme) (string, bool) {
-	shown, more, ok := s.bannerNotice(time.Now())
+func renderNotice(s State, width int, t theme, now time.Time) (string, bool) {
+	shown, more, ok := s.bannerNotice(now)
 	if !ok {
 		return "", false
 	}
@@ -251,7 +254,7 @@ func renderNotice(s State, width int, t theme) (string, bool) {
 	return style.Render(text) + t.muted().Render(suffix), true
 }
 
-func renderBody(s State, width, height int, t theme) string {
+func renderBody(s State, width, height int, t theme, now time.Time) string {
 	switch s.mode {
 	case ModeHelp:
 		return renderHelp(s, width, height, t)
@@ -262,7 +265,7 @@ func renderBody(s State, width, height int, t theme) string {
 	case ModeNew:
 		return renderNewForm(s, width, height, t)
 	case ModeCleanup:
-		return renderCleanup(s, width, height, t)
+		return renderCleanup(s, width, height, t, now)
 	case ModeCleanupDetail:
 		return renderCleanupDetail(s, width, height, t)
 	case ModeCleanupConfirm:

@@ -614,10 +614,14 @@ Groups, mapped from `ops.CleanupItem`:
 
 Each row shows project/branch (or the worktree path), classification, and the
 classification reason (`Detail`). The per-row detail (`v`, or `Enter` with no
-selection) shows kind, action, safe/removable/requires-force, branch state, the
-full reason, the exact loss for dirty/unmerged items, and any result or error.
-The orphan section is part of the same report but is not fixed here; use
-`rexws cleanup --fix` for stale `state.json` entries.
+selection) shows kind, action, safe/removable/requires-force, branch state, loss
+counts and, when space allows, the affected paths and commits, the reason, and
+any result or error that fits; at the minimum size the tail is clipped with an
+explicit `… N more line(s) not shown` marker. The `Loss:` count summary sits above
+any `Error:`, so an applied failure cannot clip it at the minimum size; the
+per-path and per-commit `Loss detail:` list follows the reason. The orphan
+section is part of the same report but is not fixed here; use `rexws cleanup
+--fix` for stale `state.json` entries.
 
 Keys: `j`/`k` and arrows move (group headers are skipped; does not wrap;
 stops at the edges), `Space` toggles,
@@ -627,18 +631,23 @@ and discards the previous result, `Esc` returns to the dashboard.
 
 The confirmation modal names the exact count and actions: worktrees removed,
 branches deleted, prunable records pruned, items kept, retained branches (with
-names), each selected force-required item and its loss, warnings/errors, and
-the orphan count (`rexws cleanup --fix` handles orphans; this screen does not).
-`y` applies the snapshotted selection; `n` or `Esc` cancels. `Enter` does not
-apply: it is the key that opened the review from the list, so a held or
-double-tapped `Enter` is ignored here. The snapshot is built when the modal
-opens, so the applied report is exactly what was confirmed. A force selection
-also gets a headline loss summary (`Force: on - 2 force item(s): 2 changed
-path(s), 1 unmerged commit(s)`) that stays visible when the 60-column body
-clips; the body ends with an explicit `… N more line(s) not shown` marker
+names), and each selected force-required item and its loss. The headline also
+carries the force loss summary, the warnings/errors count (with the first
+message), and the orphan count (`rexws cleanup --fix` handles orphans; this
+screen does not), so the 60-column body clip cannot hide them. The exact
+`Will remove`, `Kept`, and `Retained branches` lines follow the headline, ahead
+of the explanatory prose and the per-item list, for the same reason. `y` applies
+the snapshotted selection; `n` or `Esc` cancels, and a pasted `y` is ignored.
+`Enter` does not apply: it is the key that opened the review from the list, so a
+held or double-tapped `Enter` is ignored here. The snapshot is built when the
+modal opens, so the applied report is exactly what was confirmed. A force
+selection also gets a headline loss summary (`Force: on - 2 force item(s): 2
+changed path(s), 1 unmerged commit(s)`) that stays visible when the 60-column
+body clips; the body ends with an explicit `… N more line(s) not shown` marker
 instead of silently dropping lines. A refused apply (for example the Rex gate)
-keeps the preview and selection and is reported as an error, never as
-`Cleanup applied`.
+keeps the preview and selection, is reported as an error, never as
+`Cleanup applied`, and leaves a persistent error line once the transient banner
+expires.
 
 After apply the screen stays open with per-item `removed`/`failed`/`kept`
 results, the failed item's error in place of its reason, and the applied and
@@ -651,13 +660,15 @@ including Rex unavailable, shows `Cleanup unavailable` with the error and
 `[r] retry  [Esc] back`; no candidates shows `No cleanup candidates.` Apply runs
 in a `tea.Cmd`, so the UI stays responsive; while an apply is in flight every
 key except `Ctrl+C` is ignored and the footer shows `applying…`. After apply the
-detail screen keeps a loss count summary at the top and ends clipped content
-with an explicit `… N more line(s) not shown` marker.
+detail screen keeps a `Loss:` count summary above any `Error:` and ends clipped
+content with an explicit `… N more line(s) not shown` marker.
 
 At 60 columns the preview status line puts selection and force before the group
 counts (`sel 1 · force off · 2 safe · 1 review · 3 blocked`), so a long count
 cannot truncate the safety controls; applied results put the result counts and
-retained branches first. Rows use an 18-cell target and 11-cell classification.
+retained branches first, and a line that still exceeds the width ends with an
+ellipsis instead of a silent hard cut. Rows use an 18-cell target and 11-cell
+classification.
 The compact footer is `[sp] pick [f] force [r] rescan [Enter] review [Esc] back`
 (`a` select-all-safe and `v` detail remain available and are listed above). At
 80 the full footer is `[Space] pick [a] safe [f] force [v] detail [r] rescan
