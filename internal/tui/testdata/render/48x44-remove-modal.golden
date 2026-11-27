@@ -1,0 +1,44 @@
+ REXWS  [4 ws · 3 live]                         
+────────────────────────────────────────────────
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+ ╭─ Remove workstream ────────────────────────╮ 
+ │ Remove rexws/m1-m2-core-rex?               │ 
+ │                                            │ 
+ │ Worktree: /wt/rexws                        │ 
+ │                                            │ 
+ │ This closes its Rex session and windows,   │ 
+ │ runs the provider remove command, and      │ 
+ │ deletes its workflow state.                │ 
+ │                                            │ 
+ │ Loss:                                      │ 
+ │ nothing would be lost                      │ 
+ │                                            │ 
+ │ Retained:                                  │ 
+ │ branch m1-m2-core-rex state is unknown     │ 
+ │                                            │ 
+ │ Actions:                                   │ 
+ │ no live Rex session to close               │ 
+ │ run provider "" remove:                    │ 
+ │ retain branch m1-m2-core-rex (state        │ 
+ │ unknown)                                   │ 
+ │ clear workflow state for /wt/rexws         │ 
+ │                                            │ 
+ │ Warning: project bad: missing              │ 
+ ╰────────────────────────────────────────────╯ 
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+ [y/Enter] confirm [n/Esc] cancel               

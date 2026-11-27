@@ -219,7 +219,7 @@ type newForm struct {
 
 func newState() State {
 	input := textinput.New()
-	input.Prompt = " Search: "
+	input.Prompt = searchPrompt
 	input.Width = 40
 	return State{
 		width:          80,
@@ -509,7 +509,7 @@ func (s State) enterSearch() State {
 	s.mode = ModeSearch
 	s.input.SetValue(s.query)
 	s.input.CursorEnd()
-	s.input.Width = max(10, s.width-40)
+	s.input.Width = searchInputWidth(s.width)
 	s.input.Focus()
 	return s
 }

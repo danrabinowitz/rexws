@@ -1,0 +1,44 @@
+ REXWS  [4 ws · 3 live]                         
+────────────────────────────────────────────────
+ Cleanup  sel 0 · force off                     
+ 2 safe · 2 review · 2 blocked                  
+ ▌ SAFE (2)                                     
+ > [ ] rexws/f…t/safe  merged     branch is an …
+   [ ] rexws/…/merged  merged     branch is an …
+ ▌ NEEDS REVIEW (2)  force required (f)         
+   [-] rexws/f…/dirty  dirty      uncommitted, …
+   [-] rexw…/unmerged  unmerged   2 commits not…
+ ▌ BLOCKED (2)                                  
+   [-] rexws/main      protected  protected bra…
+   [-] rexws/…/active  active     live Rex sess…
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+ [sp] pick [f] force [Enter] review [Esc] back  

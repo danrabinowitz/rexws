@@ -38,7 +38,7 @@ func TestRenderWidthsUnderFixedProfiles(t *testing.T) {
 		{"truecolor", termenv.TrueColor},
 	}
 	for _, p := range profiles {
-		for _, width := range []int{60, 80, 120, 200} {
+		for _, width := range []int{48, 60, 80, 120, 200} {
 			t.Run(fmt.Sprintf("%s-%d", p.name, width), func(t *testing.T) {
 				setProfile(t, p.profile)
 				setGlyphs(t, false)
@@ -82,7 +82,10 @@ func TestRenderWidthsUnderFixedProfiles(t *testing.T) {
 					t.Errorf("groups missing:\n%s", plain)
 				}
 				wantBadge := "blocked (permissi"
-				if width >= 80 {
+				switch {
+				case width < 60:
+					wantBadge = "blocked (per…"
+				case width >= 80:
 					wantBadge = "blocked (permission)"
 				}
 				if !strings.Contains(plain, wantBadge) {
@@ -137,10 +140,12 @@ func TestRenderColumnGridAlignsBadges(t *testing.T) {
 		showCount  bool
 		branch     int
 		badgeStart int
+		badgeText  string
 	}{
-		{60, 10, 18, 0, false, 21, 42},
-		{80, 12, 28, 8, true, 19, 42},
-		{120, 16, 28, 8, true, 55, 82},
+		{48, 10, 13, 0, false, 14, 35, "blocked (per…"},
+		{60, 10, 18, 0, false, 21, 42, "blocked (permissi"},
+		{80, 12, 28, 8, true, 19, 42, "blocked (permissi"},
+		{120, 16, 28, 8, true, 55, 82, "blocked (permissi"},
 	}
 	for _, tc := range cases {
 		t.Run(fmt.Sprint(tc.width), func(t *testing.T) {
@@ -165,7 +170,7 @@ func TestRenderColumnGridAlignsBadges(t *testing.T) {
 			}
 
 			parent := lineContaining(t, out, "m1-m2-core-rex")
-			parentBadge := strings.Index(parent, "blocked (permissi")
+			parentBadge := strings.Index(parent, tc.badgeText)
 			if parentBadge < 0 {
 				t.Fatalf("parent badge missing: %q", parent)
 			}
@@ -174,7 +179,7 @@ func TestRenderColumnGridAlignsBadges(t *testing.T) {
 			}
 
 			child := lineContaining(t, out, "• tests")
-			childBadge := strings.Index(child, "blocked (permissi")
+			childBadge := strings.Index(child, tc.badgeText)
 			if childBadge < 0 {
 				t.Fatalf("child badge missing: %q", child)
 			}
@@ -378,7 +383,7 @@ func TestRenderStateCopies(t *testing.T) {
 	t.Run("too-small", func(t *testing.T) {
 		s := renderState(t, 42, 10)
 		out := Render(s)
-		if !strings.Contains(out, "terminal too small") || !strings.Contains(out, "need 60x18, have 42x10") {
+		if !strings.Contains(out, "terminal too small") || !strings.Contains(out, "need 48x18, have 42x10") {
 			t.Errorf("too-small copy missing:\n%s", out)
 		}
 	})
@@ -572,6 +577,7 @@ func TestRenderHelpPanelComplete(t *testing.T) {
 		height   int
 		boxWidth int
 	}{
+		{48, 44, 46},
 		{60, 18, 56},
 		{60, 24, 56},
 		{80, 24, 64},
@@ -872,5 +878,298 @@ func TestRenderASCIIEveryScreen(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNewGridWidthTiers(t *testing.T) {
+	setGlyphs(t, false)
+	rows := renderState(t, 80, 24).rows
+	cases := []struct {
+		width             int
+		project, branch   int
+		badge, label, app int
+		count             int
+		showCount         bool
+	}{
+		{48, 10, 14, 13, 12, 11, 0, false},
+		{59, 10, 25, 13, 12, 22, 0, false},
+		{60, 10, 21, 18, 12, 18, 0, false},
+		{80, 12, 19, 28, 12, 18, 8, true},
+	}
+	for _, tc := range cases {
+		g := newGrid(rows, tc.width)
+		if g.project != tc.project || g.branch != tc.branch || g.badge != tc.badge ||
+			g.label != tc.label || g.app != tc.app || g.count != tc.count || g.showCount != tc.showCount {
+			t.Errorf("newGrid(%d) = project %d branch %d badge %d label %d app %d count %d show %t",
+				tc.width, g.project, g.branch, g.badge, g.label, g.app, g.count, g.showCount)
+		}
+	}
+}
+
+func TestRenderTooSmallBoundaries(t *testing.T) {
+	setProfile(t, termenv.Ascii)
+	setGlyphs(t, false)
+	rejected := []struct {
+		width, height int
+		copy          string
+	}{
+		{47, 44, "need 48x18, have 47x44"},
+		{48, 17, "need 48x18, have 48x17"},
+	}
+	for _, tc := range rejected {
+		out := Render(renderState(t, tc.width, tc.height))
+		if !strings.Contains(out, "terminal too small") || !strings.Contains(out, tc.copy) {
+			t.Errorf("%dx%d did not report too small with %q:\n%s", tc.width, tc.height, tc.copy, out)
+		}
+	}
+	out := Render(renderState(t, 48, 18))
+	if strings.Contains(out, "terminal too small") {
+		t.Errorf("48x18 is rejected:\n%s", out)
+	}
+	assertScreen(t, out, 48, 18)
+}
+
+func TestHeaderWholeChipsAt48(t *testing.T) {
+	setProfile(t, termenv.Ascii)
+	setGlyphs(t, false)
+	health := []struct {
+		name  string
+		token string
+		build func(t *testing.T) State
+	}{
+		{"none", "", func(t *testing.T) State { return renderState(t, 48, 44) }},
+		{"rex-never-loaded", "Rex unavailable (r)", func(t *testing.T) State {
+			s := renderState(t, 48, 44)
+			s.rexAvailable, s.rexEverLoaded = false, false
+			return s.rebuild()
+		}},
+		{"rex-paused", "Rex unavailable; paused (r)", func(t *testing.T) State {
+			s := renderState(t, 48, 44)
+			s.rexAvailable, s.rexEverLoaded = false, true
+			return s.rebuild()
+		}},
+		{"live-paused", "live paused (r)", func(t *testing.T) State {
+			s := renderState(t, 48, 44)
+			for _, id := range s.liveSessionIDs() {
+				s.streamPaused[id] = true
+			}
+			return s.rebuild()
+		}},
+		{"one-stream", "1 stream paused (r)", func(t *testing.T) State {
+			s := renderState(t, 48, 44)
+			s.streamPaused["session:rexws"] = true
+			return s.rebuild()
+		}},
+		{"two-streams", "2 streams paused (r)", func(t *testing.T) State {
+			s := renderState(t, 48, 44)
+			s.streamPaused["session:rexws"] = true
+			s.streamPaused["session:dosido"] = true
+			return s.rebuild()
+		}},
+	}
+	queries := []string{"", "a", "rex", strings.Repeat("q", 40)}
+	for _, hc := range health {
+		for _, query := range queries {
+			t.Run(hc.name+"/"+fmt.Sprintf("%d", len(query)), func(t *testing.T) {
+				s := hc.build(t)
+				if query != "" {
+					s = s.setQuery(query)
+				}
+				lines := assertScreen(t, Render(s), 48, 44)
+				header := strings.TrimRight(stripANSI(lines[0]), " ")
+				if hc.token != "" && !strings.Contains(header, hc.token) {
+					t.Errorf("health token %q was cut: %q", hc.token, header)
+				}
+				// Counts are a whole chip or absent, and always end the line.
+				if strings.Contains(header, "[") && !strings.HasSuffix(header, "]") {
+					t.Errorf("counts chip was cut: %q", header)
+				}
+				// The filter chip is whole or absent, never a `filter: … ×`
+				// sliver: when present it keeps its terminator.
+				if at := strings.Index(header, "filter: "); at >= 0 {
+					chip := header[at+len("filter: "):]
+					terminator := strings.Index(chip, " "+currentGlyphs().times)
+					if terminator < 0 {
+						t.Errorf("filter chip lost its terminator: %q", header)
+					}
+				}
+			})
+		}
+	}
+
+	// A one-cell query with the longest health token leaves only one usable
+	// query cell; the whole chip must be dropped even though the built line is
+	// exactly 48 cells and would otherwise fit.
+	t.Run("short-query-long-health-drops-chip", func(t *testing.T) {
+		s := renderState(t, 48, 44)
+		s.rexAvailable, s.rexEverLoaded = false, true
+		s = s.setQuery("a")
+		lines := assertScreen(t, Render(s), 48, 44)
+		header := strings.TrimRight(stripANSI(lines[0]), " ")
+		if strings.Contains(header, "filter:") {
+			t.Errorf("one-cell query kept the chip: %q", header)
+		}
+		if !strings.Contains(header, "Rex unavailable; paused (r)") {
+			t.Errorf("health token was cut: %q", header)
+		}
+	})
+}
+
+func TestRenderLongWindowLabelAt48(t *testing.T) {
+	setProfile(t, termenv.Ascii)
+	setGlyphs(t, false)
+	s := renderState(t, 48, 24)
+	s = s.withExpanded("/wt/rexws", true)
+	s.workstreams[0].Windows[0].Label = "long-window-label-that-overflows"
+	s = s.rebuild()
+
+	g := newGrid(s.rows, 48)
+	if g.label != 16 || g.app != 7 {
+		t.Fatalf("grid = label %d app %d, want 16/7", g.label, g.app)
+	}
+	out := Render(s)
+	assertScreen(t, out, 48, 24)
+	window := lineContaining(t, out, "long-window")
+	badge := strings.Index(window, "working")
+	if badge < 0 {
+		t.Fatalf("window badge missing: %q", window)
+	}
+	if got := lipgloss.Width(window[:badge]); got != 35 {
+		t.Errorf("window badge starts at %d, want 35: %q", got, window)
+	}
+}
+
+func TestRenderPendingSuffixAt48(t *testing.T) {
+	setProfile(t, termenv.Ascii)
+	setGlyphs(t, false)
+	labels := []string{
+		"switching…", "saving status…", "checking…", "removing…",
+		"preparing…", "creating…", "verifying…",
+	}
+	for _, query := range []string{"", "rexws"} {
+		for _, label := range labels {
+			t.Run(label+"/"+query, func(t *testing.T) {
+				s := renderState(t, 48, 18)
+				if query != "" {
+					s = s.setQuery(query)
+				}
+				s.pending = true
+				s.pendingLabel = label
+				s = s.rebuild()
+				lines := assertScreen(t, Render(s), 48, 18)
+				footer := strings.TrimRight(stripANSI(lines[len(lines)-1]), " ")
+				if !strings.HasSuffix(footer, label) {
+					t.Errorf("pending suffix %q was dropped: %q", label, footer)
+				}
+				if !strings.Contains(footer, "[Enter] switch") {
+					t.Errorf("pending footer dropped the switch key: %q", footer)
+				}
+			})
+		}
+	}
+	t.Run("refreshing", func(t *testing.T) {
+		s := renderState(t, 48, 18)
+		s.loading = true
+		s = s.rebuild()
+		lines := assertScreen(t, Render(s), 48, 18)
+		if !strings.Contains(stripANSI(lines[len(lines)-1]), "refreshing…") {
+			t.Errorf("refresh suffix was dropped: %q", stripANSI(lines[len(lines)-1]))
+		}
+	})
+}
+
+func TestRenderHelpAt48(t *testing.T) {
+	setProfile(t, termenv.Ascii)
+	setGlyphs(t, false)
+	s := renderState(t, 48, 18)
+	s.mode = ModeHelp
+	out := Render(s)
+	assertScreen(t, out, 48, 18)
+	plain := stripANSI(out)
+	for _, want := range []string{
+		"╭─ Help",
+		"Markers",
+		"▸▾ collapsed/expanded",
+		"↳ context  ? unknown  — none",
+		"ambiguous session binding",
+		"live updates paused for this session",
+		"!‖  both",
+		"x   dismiss the newest action error",
+		"Keys",
+		"space enter  toggle / switch",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("48-column help missing %q:\n%s", want, plain)
+		}
+	}
+	border := lineContaining(t, out, "╭─ Help")
+	start := strings.Index(border, "╭")
+	end := strings.LastIndex(border, "╮")
+	if start < 0 || end < 0 {
+		t.Fatalf("help border missing: %q", border)
+	}
+	if got := lipgloss.Width(border[start : end+len("╮")]); got != 46 {
+		t.Errorf("48-column help box = %d cells, want 46: %q", got, border)
+	}
+	// The rest of the key map scrolls into view rather than clipping.
+	s.helpOffset = 100
+	scrolled := stripANSI(Render(s))
+	for _, want := range []string{"s n d r  status/new/remove/refresh", "c  cleanup", "/ ? q        search / help / quit"} {
+		if !strings.Contains(scrolled, want) {
+			t.Errorf("scrolled 48-column help missing %q:\n%s", want, scrolled)
+		}
+	}
+}
+
+func TestRender48ASCII(t *testing.T) {
+	setProfile(t, termenv.Ascii)
+	setGlyphs(t, true)
+	s := renderState(t, 48, 44)
+	s = s.withExpanded("/wt/rexws", true)
+	for _, screen := range []State{s, func() State {
+		h := renderState(t, 48, 44)
+		h.mode = ModeHelp
+		return h
+	}()} {
+		out := Render(screen)
+		assertScreen(t, out, 48, 44)
+		if strings.Contains(out, "\x1b") {
+			t.Errorf("ASCII 48 render contains an escape:\n%q", out)
+		}
+		for _, r := range out {
+			if r > 127 {
+				t.Errorf("ASCII 48 render contains non-ASCII rune %q:\n%s", r, out)
+				break
+			}
+		}
+	}
+}
+
+func TestSearchInputWidthAgreesAt48(t *testing.T) {
+	setProfile(t, termenv.Ascii)
+	setGlyphs(t, false)
+	if got := searchInputWidth(48); got != 10 {
+		t.Errorf("searchInputWidth(48) = %d, want 10", got)
+	}
+	if got := searchInputWidth(60); got != 12 {
+		t.Errorf("searchInputWidth(60) = %d, want 12", got)
+	}
+	if strings.Contains(searchKeys(48), "move") {
+		t.Errorf("48-column search keys kept the move hint: %q", searchKeys(48))
+	}
+	if !strings.Contains(searchKeys(60), "move") {
+		t.Errorf("60-column search keys lost the move hint: %q", searchKeys(60))
+	}
+	s := renderState(t, 48, 18)
+	s = s.enterSearch()
+	if s.input.Width != searchInputWidth(48) {
+		t.Errorf("enterSearch width = %d, want %d", s.input.Width, searchInputWidth(48))
+	}
+	lines := assertScreen(t, Render(s), 48, 18)
+	footer := stripANSI(lines[len(lines)-1])
+	for _, want := range []string{"Search:", "[Enter] accept", "[Esc] clear"} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("48-column search bar missing %q: %q", want, footer)
+		}
 	}
 }

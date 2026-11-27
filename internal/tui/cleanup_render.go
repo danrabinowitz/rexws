@@ -31,16 +31,21 @@ func renderCleanup(s State, width, height int, t theme, now time.Time) string {
 		return renderCleanupEmpty(width, height)
 	}
 
-	status := cleanupStatusLine(view, width, t)
+	status := cleanupStatusLines(view, width, t)
 	rows := renderCleanupRows(view, width, t)
 	fixed := 1
+	if width < 60 {
+		// The 48-column tier uses a two-line status so no safety fact is
+		// hidden; the viewport gives up the second row.
+		fixed = 2
+	}
 	errText, hasErrLine := cleanupRefusedError(s, now)
 	if hasErrLine {
 		fixed++
 	}
 	bodyHeight := max(0, height-fixed)
 	if bodyHeight == 0 {
-		return fitWidth(status, width)
+		return fitWidth(strings.Join(status, "\n"), width)
 	}
 
 	top := 0
@@ -56,7 +61,10 @@ func renderCleanup(s State, width, height int, t theme, now time.Time) string {
 	pane := viewport.New(width, bodyHeight)
 	pane.SetContent(strings.Join(rows, "\n"))
 	pane.SetYOffset(top)
-	lines := []string{fitWidth(status, width)}
+	lines := make([]string, 0, len(status)+1+bodyHeight)
+	for _, line := range status {
+		lines = append(lines, fitWidth(line, width))
+	}
 	if hasErrLine {
 		lines = append(lines, renderCleanupErrorLine(errText, width, t))
 	}
@@ -108,6 +116,67 @@ func renderCleanupEmpty(width, height int) string {
 		return centerBlock([]string{"No cleanup candidates. Press r to rescan, Esc to go back."}, width, height)
 	}
 	return centerBlock([]string{"No cleanup candidates.", "Press r to rescan, Esc to go back."}, width, height)
+}
+
+// cleanupStatusLines returns the fixed summary above the list. It is one line
+// at 60+, and two lines at 48-59 so selection, force, and the group counts all
+// stay visible.
+func cleanupStatusLines(view *cleanupView, width int, t theme) []string {
+	if width < 60 {
+		return cleanupNarrowStatus(view, width, t)
+	}
+	return []string{cleanupStatusLine(view, width, t)}
+}
+
+// cleanupNarrowStatus is the two-line 48-59 status. Line one carries the
+// selection and force safety controls (or applied totals); line two carries
+// the group counts and any extras.
+func cleanupNarrowStatus(view *cleanupView, width int, t theme) []string {
+	var primary, secondary []string
+	if view.loading {
+		primary = append(primary, "scanning"+t.glyphs.ellipsis)
+	}
+	force := "force off"
+	if view.force {
+		force = "force on"
+	}
+	if view.applied {
+		totals := view.report.Totals
+		primary = append(primary,
+			fmt.Sprintf("%d removed", totals.Removed),
+			fmt.Sprintf("%d failed", totals.Failed),
+			fmt.Sprintf("%d kept", totals.Kept))
+		if retained := cleanupRetainedBranches(view.report); len(retained) > 0 {
+			secondary = append(secondary, fmt.Sprintf("%d retained", len(retained)))
+		}
+	} else {
+		safe, review, blocked := cleanupGroupCounts(view.items)
+		selected := len(view.selectedCleanupItems())
+		primary = append(primary, fmt.Sprintf("sel %d", selected), force)
+		secondary = append(secondary,
+			fmt.Sprintf("%d safe", safe),
+			fmt.Sprintf("%d review", review),
+			fmt.Sprintf("%d blocked", blocked))
+	}
+	if orphans := len(view.report.Orphans.Items); orphans > 0 {
+		secondary = append(secondary, fmt.Sprintf("%d orphans", orphans))
+	}
+	if view.err != "" {
+		secondary = append(secondary, "error")
+	}
+	label := "Cleanup"
+	if view.applied {
+		label = "Cleanup applied"
+	}
+	line1 := " " + t.accent().Bold(true).Render(label)
+	if len(primary) > 0 {
+		line1 += "  " + t.muted().Render(strings.Join(primary, " · "))
+	}
+	line2 := ""
+	if len(secondary) > 0 {
+		line2 = " " + t.muted().Render(strings.Join(secondary, " · "))
+	}
+	return []string{fitStatusLine(line1, width, t), fitStatusLine(line2, width, t)}
 }
 
 // cleanupStatusLine is the fixed summary above the list. At narrow widths the
@@ -249,7 +318,13 @@ func renderCleanupItemRow(view *cleanupView, index int, cursor bool, width int, 
 	}
 
 	targetWidth, classWidth, resultWidth := 24, 14, 9
-	if width < 80 {
+	switch {
+	case width < 60:
+		// The 48-column tier spends its width on the reason: target 14,
+		// class 9, reason 14. Applied rows reuse the class cell for the
+		// result instead of adding a fourth column.
+		targetWidth, classWidth, resultWidth = 14, 9, 7
+	case width < 80:
 		targetWidth, classWidth, resultWidth = 18, 11, 7
 	}
 	target := truncateMiddle(render.Sanitize(cleanupTargetLabel(item.Item)), targetWidth)
@@ -286,9 +361,22 @@ func renderCleanupItemRow(view *cleanupView, index int, cursor bool, width int, 
 		{text: " " + marker, style: base},
 		{text: "[" + check + "] ", style: checkStyle},
 		{text: pad(target, targetWidth) + "  ", style: targetStyle},
-		{text: pad(class, classWidth) + "  ", style: classStyle},
 	}
-	if view.applied {
+	if view.applied && width < 60 {
+		// Reuse the classification cell for the applied result; a fourth
+		// column would leave the reason at five cells.
+		resultStyle := t.muted()
+		switch item.Item.Result {
+		case ops.CleanupResultRemoved:
+			resultStyle = t.info()
+		case ops.CleanupResultFailed:
+			resultStyle = t.error()
+		}
+		segs = append(segs, seg{text: pad(truncate(result, classWidth), classWidth) + "  ", style: resultStyle})
+	} else {
+		segs = append(segs, seg{text: pad(class, classWidth) + "  ", style: classStyle})
+	}
+	if view.applied && width >= 60 {
 		resultStyle := t.muted()
 		switch item.Item.Result {
 		case ops.CleanupResultRemoved:
@@ -312,15 +400,30 @@ func renderCleanupDetail(s State, width, height int, t theme) string {
 	lines := []string{
 		t.accent().Bold(true).Render(render.Sanitize(cleanupTargetLabel(job))),
 		"",
-		fmt.Sprintf("Kind: %s   Classification: %s", render.Sanitize(job.Kind), render.Sanitize(string(job.Classification))),
-		fmt.Sprintf("Action: %s", render.Sanitize(string(cleanupActionOrNone(job)))),
-		fmt.Sprintf("Safe: %s   Removable: %s   Requires force: %s",
-			yesNo(job.Safe), yesNo(job.Removable), yesNo(job.RequiresForce)),
+	}
+	kindLine := fmt.Sprintf("Kind: %s   Classification: %s", render.Sanitize(job.Kind), render.Sanitize(string(job.Classification)))
+	actionLine := fmt.Sprintf("Action: %s", render.Sanitize(string(cleanupActionOrNone(job))))
+	safeLine := fmt.Sprintf("Safe: %s   Removable: %s   Requires force: %s",
+		yesNo(job.Safe), yesNo(job.Removable), yesNo(job.RequiresForce))
+	if width < 60 {
+		// The 48-column tier wraps these fields instead of hard-cutting them
+		// at the content edge.
+		lines = append(lines, wrapFieldLine(kindLine, contentWidth)...)
+		lines = append(lines, wrapFieldLine(actionLine, contentWidth)...)
+		lines = append(lines, wrapFieldLine(safeLine, contentWidth)...)
+	} else {
+		lines = append(lines, kindLine, actionLine, safeLine)
 	}
 	if job.BranchState != "" {
 		lines = append(lines, "Branch state: "+render.Sanitize(string(job.BranchState)))
 	}
-	lines = append(lines, "Selection: "+cleanupSelectionHint(s.cleanup, item))
+	selectionLine := "Selection: " + cleanupSelectionHint(s.cleanup, item)
+	if width < 60 {
+		// The 48-column tier wraps the hint rather than clipping `enable`.
+		lines = append(lines, wrapFieldLine(selectionLine, contentWidth)...)
+	} else {
+		lines = append(lines, selectionLine)
+	}
 	if job.Result != "" {
 		lines = append(lines, "Result: "+render.Sanitize(string(job.Result)))
 	}
@@ -345,6 +448,15 @@ func renderCleanupDetail(s State, width, height int, t theme) string {
 	}
 	lines = clipModalLines(lines, height, t)
 	return renderModalBox("Cleanup detail", lipgloss.NewStyle().Bold(true), lines, width, height, t)
+}
+
+// wrapFieldLine wraps a labeled field line only when it exceeds the content
+// width, so short lines keep their column alignment.
+func wrapFieldLine(text string, width int) []string {
+	if lipgloss.Width(text) <= width {
+		return []string{text}
+	}
+	return wrapText(text, width)
 }
 
 // clipModalLines reserves one visible line for an explicit truncation marker so

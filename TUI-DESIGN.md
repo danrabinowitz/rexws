@@ -2,13 +2,13 @@
 
 **Status:** approved design for issues [#11](https://github.com/danrabinowitz/rexws/issues/11), [#12](https://github.com/danrabinowitz/rexws/issues/12), [#13](https://github.com/danrabinowitz/rexws/issues/13); #11 decisions confirmed 2026-11-26.
 **Repository:** `/Users/djr/code/src/danrabinowitz/rexws` at `c4d2477`. Paths in citations are under that root.
-**Baseline:** assumes the issue #1 reliability UX has landed: header health token, `!`/`‖`/`!‖` row markers, banner precedence, 60×18 minimum. That work is in flight and is not in `main` yet; where this brief depends on it, it says so.
+**Baseline:** assumes the issue #1 reliability UX has landed: header health token, `!`/`‖`/`!‖` row markers, banner precedence, 48×18 minimum. That work is in flight and is not in `main` yet; where this brief depends on it, it says so.
 
 ## 0. Key decisions
 
 - **Color is a role system, not a palette of hexes.** Every semantic has a non-color carrier; ANSI-16 is the compatibility floor, 256-color and truecolor are enhancements. `live` is deliberately uncolored; stale is muted plus `‖`.
 - **Content width caps at 120 cells and centers above that.** The whole frame (header, separator, body, banner, footer) is composed at `W = min(terminalWidth, 120)`; excess columns are margins. Above 120 the layout is byte-for-byte the 120 layout. No split panes, no new navigable level, no new metadata columns.
-- **A fixed column grid replaces ad-hoc flexing.** Fixed tree and marker cells; project 10/12/16 cells; branch flex; badge 18/28; a right-aligned 8-cell count rail at ≥80; the child app sits in a right-aligned flex cell so parent and child badges share one rail.
+- **A fixed column grid replaces ad-hoc flexing.** Fixed tree and marker cells; project 10/12/16 cells; branch flex; badge 13 at 48–59 and 18/28 above; a right-aligned 8-cell count rail at ≥80; the child app sits in a right-aligned flex cell so parent and child badges share one rail.
 - **#12 ships built-in status colors by status ID; #13 makes them configurable.** `StatusDef` gains optional `color` and `icon`; invalid values warn and fall back, never fail the load; no config schema version is needed.
 - **Document path:** `TUI-DESIGN.md` at the repository root; pointer text for `TUI-UX.md` is in §9.
 
@@ -175,33 +175,33 @@ Monochrome terminals without bold/underline still have all the glyphs, words, an
 - `W = min(terminalWidth, 120)`.
 - Above 120, center the entire frame: left margin = `(terminalWidth - W) / 2`; the right margin absorbs the remainder. The header, separator, every row, the banner, and the footer are all composed at `W`, so margins are symmetric and the frame is one block.
 - At ≤120, the frame uses the full width with its existing 1-cell leading gutter.
-- The minimum-size check uses the real terminal: `< 60×18` → centered “terminal too small” (`internal/tui/render.go:38-40`).
+- The minimum-size check uses the real terminal: `< 48×18` → centered “terminal too small” with `need 48x18, have WxH` (`internal/tui/render.go:31-33`). The 48-column tier exists for the mobile Rex app's 48×44 viewport.
 - Rationale for centering: a left-aligned 120 block on a 300-column terminal reads as a rendering bug; centering makes the cap intentional. The cost is a shifting left edge when resizing across 120; acceptable for a dashboard. If the team prefers a fixed left edge, use a 2-cell left gutter and leave the right margin empty; the grid is unchanged.
 
 ### 3.2 Column grid
 
 All cells are fixed or flex per the table; every row is padded to `W` and never wraps.
 
-| Column | 60–79 | 80–119 | 120+ | Notes |
-|---|---|---|---|---|
-| left gutter | 1 | 1 | 1 | leading space |
-| selection | 2 | 2 | 2 | `> ` / `  ` |
-| tree | 2 | 2 | 2 | `▸ `, `▾ `, `↳ `, or `  `; always reserved, so stopped rows align |
-| project | 10 | 12 | 16 | truncated with `…` |
-| gap | 2 | 2 | 2 | |
-| branch | flex | flex | flex | `B = W - 11 - P - R - C`, minus the 2-cell count gap when present; fills remaining (21 at 60, 19 at 80, 55 at 120) |
-| gap | 1 | 1 | 1 | |
-| marker | 2 | 2 | 2 | `  `, `! `, `‖ `, `!‖` |
-| gap | 1 | 1 | 1 | |
-| badge | 18 | 28 | 28 | parent and child share this rail |
-| gap | 0 | 2 | 2 | |
-| count | — | 8 | 8 | right-aligned; blank rail on rows without a count |
-| header counts | follows chips | follows chips | right-aligned at `W` | |
-| footer status | appended | right-aligned | right-aligned | `refreshing…`, `switching…` |
+| Column | 48–59 | 60–79 | 80–119 | 120+ | Notes |
+|---|---|---|---|---|---|
+| left gutter | 1 | 1 | 1 | 1 | leading space |
+| selection | 2 | 2 | 2 | 2 | `> ` / `  ` |
+| tree | 2 | 2 | 2 | 2 | `▸ `, `▾ `, `↳ `, or `  `; always reserved, so stopped rows align |
+| project | 10 | 10 | 12 | 16 | truncated with `…`; never dropped at 48 |
+| gap | 2 | 2 | 2 | 2 | |
+| branch | flex | flex | flex | flex | `B = W - 11 - P - R - C`, minus the 2-cell count gap when present; fills remaining (14 at 48, 25 at 59, 21 at 60, 19 at 80, 55 at 120) |
+| gap | 1 | 1 | 1 | 1 | |
+| marker | 2 | 2 | 2 | 2 | `  `, `! `, `‖ `, `!‖` |
+| gap | 1 | 1 | 1 | 1 | |
+| badge | 13 | 18 | 28 | 28 | parent and child share this rail |
+| gap | 0 | 0 | 2 | 2 | |
+| count | — | — | 8 | 8 | right-aligned; blank rail on rows without a count |
+| header counts | follows chips | follows chips | follows chips | right-aligned at `W` | |
+| footer status | appended | appended | right-aligned | right-aligned | `refreshing…`, `switching…`; at 48 whole keys drop to keep it |
 
-Child rows share the same trailing rail: label cell `L = max(12, min(longest label, 24))`; app cell flex, **right-aligned**, then blank marker (2), badge (18/28), blank count (0/8). This aligns every badge with the parent badge and clusters app+badge at the right as a status readout.
+Child rows share the same trailing rail: label cell `L = max(12, min(longest label, 24))` (capped at 16 at 48–59); app cell flex, **right-aligned**, then blank marker (2), badge (13/18/28), blank count (0/8). This aligns every badge with the parent badge and clusters app+badge at the right as a status readout. At 48 the parent and child badges both begin at cell 35.
 
-At 60–79 the footer uses single spaces and short labels (`[Esc] clear`); at 80+ it uses two spaces and full labels. Optional keys are included only as whole items, never truncated (`internal/tui/render.go:535-542`).
+At 48–59 the footer uses single spaces, drops whole keys from the end to fit a pending suffix (`[?] help`, then `[/] filter`/`[Esc] clear`, then `[→] expand`; `[Enter] switch` is never dropped), and widens modals to `width−2` (46 cells at 48); the help box stays a fixed 46 cells. At 60–79 the footer uses single spaces and short labels (`[Esc] clear`); at 80+ it uses two spaces and full labels. Optional keys are included only as whole items, never truncated.
 
 ### 3.3 How extra columns are used (no split panes, no new level)
 
@@ -240,14 +240,14 @@ At 200, the block is 120 wide with 40-cell margins. Draw the normal dashboard on
 Order: selection, tree, project, branch, marker, badge, count.
 - Project `text`, truncated at 10/12/16; branch `text`, flex, truncated with `…`.
 - Marker cell carries `!`/`‖`/`!‖`; otherwise blank.
-- Badge: text-only, aggregate color, truncated at 18/28.
+- Badge: text-only, aggregate color, truncated at 13 (48–59) or 18/28.
 - Count: `2 tabs` / `1 tab` / `1/2 tabs`, right-aligned in the 8-cell rail; hidden below 80.
 - Stopped workstreams have no chevron but keep the 2-cell tree cell, so badges align.
 - Status is not repeated.
 
 ### 4.4 Child rows
 
-Indent 2, bullet `•`, active `*` + bold label, label cell `max(12, min(longest, 24))`, app right-aligned in its flex cell (muted), blank marker, shared badge rail, blank count rail.
+Indent 2, bullet `•`, active `*` + bold label, label cell `max(12, min(longest, 24))` (capped at 16 at 48–59), app right-aligned in its flex cell (muted), blank marker, shared badge rail, blank count rail.
 - App is hidden only when the label cell would fall below 12 (`TUI-UX.md:217`).
 - A `—` app or badge is `muted`.
 - Duplicate window labels keep the last-six-ID suffix (`internal/tui/filter.go:207-219`).
@@ -256,6 +256,7 @@ Indent 2, bullet `•`, active `*` + bold label, label cell `max(12, min(longest
 
 | Width | Content | Project | Branch | Badge | Count | App | Footer |
 |---|---|---|---|---|---|---|---|
+| 48–59 | 48–59 | 10 | flex (14 at 48) | 13 | hidden | shown (label 12, capped 16) | single space; `[Esc] clear`; 4 priority keys, whole keys drop for a suffix |
 | 60–79 | 60–79 | 10 | flex (21) | 18 | hidden | shown (label ≥12) | single space; `[Esc] clear`; 4 priority keys |
 | 80–119 | 80–119 | 12 | flex (19) | 28 | 8 rail | shown | two spaces; optional keys |
 | 120 | 120 | 16 | flex (55) | 28 | 8 rail | right-aligned flex | counts right; status right |
@@ -324,9 +325,9 @@ Full-screen, composed at `W` (max 100 for prose), left-aligned:
 Centered, no colors required:
 ```
 terminal too small
-need 60x18, have 42x10
+need 48x18, have 42x10
 ```
-(second line muted). Current copy is only `terminal too small` (`internal/tui/render.go:38-40`).
+(second line muted). The check uses the real terminal dimensions, not the 120-cell content cap. 48×18 is the floor; 47×44 and 48×17 are rejected.
 
 ### 5.8 Notices and stacking
 
@@ -738,12 +739,12 @@ Ordered; each step leaves tests green.
 
 1. **Theme layer.** New `internal/tui/theme.go`: semantic tokens from §2.2, `Theme` with `Status(def)`, `Agent(state)`, `Notice(kind)`, `Glyphs` (Unicode/ASCII), `NewTheme(profile)`; light/dark via `AdaptiveColor`. Add a contrast test helper. Replace the package vars at `internal/tui/render.go:18-27`.
 2. **Apply roles.** `renderGroupRow` (`internal/tui/render.go:281-288`): status-colored `▌`, bold label, muted count, optional icon. `renderWorkstreamRow`/`renderWindowRow` (`internal/tui/render.go:290-359`): muted app/count, agent-colored badge, selection overrides. Notices (`internal/tui/render.go:119-135`): warning/error roles, muted `+N more`. Remove modal (`internal/tui/render.go:597-610`): danger. Match/selection keep bold/underline/`>`.
-3. **Frame width.** In `Render` (`internal/tui/render.go:29-65`): `W = min(width,120)`, margins for >120, compose header/separator/body/notice/footer at `W`, prefix the margin. Keep the real-terminal minimum check (`:38-40`) and fatal (`:41-43`). The separator is `─` × `W` (`:46`).
-4. **Grid.** Replace `computeWidths` (`internal/tui/render.go:186-262`) with one `Grid` type: project 10/12/16, branch flex, marker 2, badge 18/28, count 0/8, fixed tree cell, child app flex right-aligned. Parent and child badges share the rail. Update the row renderers to use it; keep `truncate`/`lipgloss.Width` and never wrap.
+3. **Frame width.** In `Render` (`internal/tui/render.go:22-63`): `W = min(width,120)`, margins for >120, compose header/separator/body/notice/footer at `W`, prefix the margin. Keep the real-terminal minimum check (`:31-33`, now 48×18) and fatal (`:36-38`). The separator is `─` × `W` (`:41`).
+4. **Grid.** Replace `computeWidths` (`internal/tui/render.go:186-262`) with one `Grid` type: for 48–59 project 10, branch flex, marker 2, badge 13, count 0, label cap 16; then project 10/12/16, branch flex, marker 2, badge 18/28, count 0/8, fixed tree cell, child app flex right-aligned. The `width < 60` case must precede the existing 120/80 cases, or the 60–79 tier is shadowed. Parent and child badges share the rail. Update the row renderers to use it; keep `truncate`/`lipgloss.Width` and never wrap.
 5. **Header/footer alignment.** Header counts right-aligned at ≥120; footer status right-aligned at ≥80; 60–79 single-space footer with `[Esc] clear`; optional keys whole-only (existing loop `internal/tui/render.go:535-542`). Keep the #1 health tokens untruncated.
 6. **State copy.** Empty (two lines at 60), loading (two lines at ≥80), fatal (use `fatalKind`; wrap prose; separate config/state remedy), no matches (two lines at 60), too-small (add current size), pending suffix roles. Add a `wrap` helper for prose only.
 7. **Glyphs.** Introduce the glyph set from §7.3; replace hardcoded `▌`, `▸`, `▾`, `↳`, `•`, `—`, `…`, `·`, `×`, and box characters. Keep sanitization before measuring (`internal/render/sanitize.go`); sanitize icons.
-8. **Tests.** `internal/tui/render_test.go`: 60/80/120/200 with `Ascii` and `TrueColor`; assert no line exceeds width (`assertScreen`, `:30-42`), exact columns, whole chips, no color-only cues, and the state copy. Add `theme_test.go` for tokens/contrast and `glyph` tests for ASCII. Update `TestRender80Columns`/`60` if counts/copy change. Keep reducer/cursor tests untouched.
+8. **Tests.** `internal/tui/render_test.go`: 48/60/80/120/200 with `Ascii` and `TrueColor`; assert no line exceeds width (`assertScreen`, `:30-42`), exact columns, whole chips, no color-only cues, and the state copy. Add `theme_test.go` for tokens/contrast and `glyph` tests for ASCII. Byte-exact goldens in `internal/tui/testdata/render/` guard 60/80/120/200 against the 48-tier change and pin the new 48 cases. Update `TestRender80Columns`/`60` if counts/copy change. Keep reducer/cursor tests untouched.
 9. **Docs.** `TUI-DESIGN.md`; pointer in `TUI-UX.md`; §4.3/§10 cross-links; README TUI link.
 
 **#12 acceptance:** no overflow or sparse rows at 200 (the 120 block centered); everything readable with color disabled; existing render/reducer tests pass; new width tests cover 60/80/120/200; TUI-UX criteria updated. The post-#1 health token and markers render in the new grid.
@@ -812,7 +813,7 @@ Coordinator decisions (2026-11-26):
 ## Summary of key decisions
 
 - **Role-based palette** with ANSI-16/256/truecolor mappings, light/dark adaptive, ≥5:1 truecolor contrast against assumed `#FFF`/`#1E1E1E`, and a mandatory non-color carrier for every semantic. `live` is uncolored; stale is muted + `‖`; selection is `>` + bold + bar; matches are bold + underline.
-- **120-cell content cap, centered**, with one grid for all widths: fixed tree/marker cells, project 10/12/16, badge 18/28, right-aligned count rail at ≥80, child app right-aligned before the shared badge rail. No split panes, no new navigable level, no new metadata columns; above 120 only margins change.
+- **120-cell content cap, centered**, with one grid for all widths: fixed tree/marker cells, project 10/12/16 (10 at 48–59), badge 13 at 48–59 and 18/28 above, right-aligned count rail at ≥80, child app right-aligned before the shared badge rail. No split panes, no new navigable level, no new metadata columns; above 120 only margins change.
 - **The post-#1 reliability UX is the baseline**: health token, `!`/`‖`/`!‖` marker cell, banner precedence. #12 refines the marker into its own cell; #1 behavior is unchanged.
 - **#12 then #13**: built-in status colors by ID in #12; optional `color`/`icon` in `StatusDef` in #13 with lenient validation, warnings, and no config schema version. `rexws list` output stays text-only and unchanged.
 - **Document:** `TUI-DESIGN.md` at the repo root, linked from `TUI-UX.md` and the README, with the explicit supersession notes in §1.4 and §8.2.
