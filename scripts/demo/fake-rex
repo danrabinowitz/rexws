@@ -1,0 +1,105 @@
+#!/bin/sh
+# Fake Rex CLI for the rexws demo.
+#
+# Scratch only. Keep REXWS_REX_BIN pointed at this file; it writes only under
+# /tmp/rexws-demo and never calls the installed Rex. All sessions, branches,
+# apps, and paths are invented.
+set -eu
+
+ROOT=${REXWS_DEMO_DIR:-/tmp/rexws-demo}
+
+case "$*" in
+  "session ls --json")
+    printf '%s\n' '{"sessions":['
+    printf '%s\n' ' {"session_id":"session:auth","label":"atlas/feat/auth"},'
+    printf '%s\n' ' {"session_id":"session:flaky","label":"atlas/fix/flaky-tests"},'
+    if [ -f "$ROOT/state/main-live" ]; then
+      printf '%s\n' ' {"session_id":"session:main","label":"atlas/main"},'
+    fi
+    printf '%s\n' ' {"session_id":"session:billing","label":"atlas/feat/billing-v2"}'
+    printf '%s\n' ']}'
+    ;;
+  "session new atlas/main "*)
+    mkdir -p "$ROOT/state"
+    : > "$ROOT/state/main-live"
+    printf '%s\n' '{"session_id":"session:main"}'
+    ;;
+  "block ls -s session:main --json") printf '%s\n' '{"blocks":[]}' ;;
+  "window ls -s session:main --json") printf '%s\n' '{"active_window_id":"","windows":[]}' ;;
+  *"do session.select"*)
+    sleep 1
+    exit 0
+    ;;
+  "block ls -s session:auth --json")
+    cat <<'JSON'
+{"blocks":[
+ {"block_id":"block:auth-agent","label":"claude","window_id":"window:auth-agent","creator_name":"com.superlogical.terminal"},
+ {"block_id":"block:auth-shell","label":"shell","window_id":"window:auth-tests","creator_name":"shell"},
+ {"block_id":"block:auth-tests","label":"codex","window_id":"window:auth-tests","creator_name":"com.superlogical.terminal"}
+]}
+JSON
+    ;;
+  "block ls -s session:flaky --json")
+    cat <<'JSON'
+{"blocks":[
+ {"block_id":"block:flaky-agent","label":"claude","window_id":"window:flaky-agent","creator_name":"com.superlogical.terminal"}
+]}
+JSON
+    ;;
+  "block ls -s session:billing --json")
+    cat <<'JSON'
+{"blocks":[
+ {"block_id":"block:billing-agent","label":"claude","window_id":"window:billing-agent","creator_name":"com.superlogical.terminal"}
+]}
+JSON
+    ;;
+  "window ls -s session:auth --json")
+    cat <<'JSON'
+{"active_window_id":"window:auth-tests","windows":[
+ {"window_id":"window:auth-agent","label":"agent","focused_block_id":"block:auth-agent","layers":[{"blocks":[{"block_id":"block:auth-agent"}]}]},
+ {"window_id":"window:auth-tests","label":"tests","focused_block_id":"block:auth-tests","layers":[{"blocks":[{"block_id":"block:auth-shell"},{"block_id":"block:auth-tests"}]}]}
+]}
+JSON
+    ;;
+  "window ls -s session:flaky --json")
+    cat <<'JSON'
+{"active_window_id":"window:flaky-agent","windows":[
+ {"window_id":"window:flaky-agent","label":"agent","focused_block_id":"block:flaky-agent","layers":[{"blocks":[{"block_id":"block:flaky-agent"}]}]}
+]}
+JSON
+    ;;
+  "window ls -s session:billing --json")
+    cat <<'JSON'
+{"active_window_id":"window:billing-agent","windows":[
+ {"window_id":"window:billing-agent","label":"agent","focused_block_id":"block:billing-agent","layers":[{"blocks":[{"block_id":"block:billing-agent"}]}]}
+]}
+JSON
+    ;;
+  "block call -s session:auth -b block:auth-agent program_status")
+    printf '%s\n' '{"records":[{"state":"blocked","kind":"permission","app":"claude-code","updated_at":"2026-11-26T09:00:00Z"}]}'
+    ;;
+  "block call -s session:auth -b block:auth-tests program_status")
+    printf '%s\n' '{"records":[{"state":"blocked","kind":"permission","app":"codex","updated_at":"2026-11-26T09:01:00Z"}]}'
+    ;;
+  "block call -s session:flaky -b block:flaky-agent program_status")
+    printf '%s\n' '{"records":[{"state":"working","app":"claude-code","updated_at":"2026-11-26T09:02:00Z"}]}'
+    ;;
+  "block call -s session:billing -b block:billing-agent program_status")
+    printf '%s\n' '{"records":[{"state":"done","app":"claude-code","updated_at":"2026-11-26T09:03:00Z"}]}'
+    ;;
+  "client ls --json")
+    printf '%s\n' '{"clients":[{"client_id":"client:app","info":{"kind":"app"}}]}'
+    ;;
+  events*)
+    # Stay connected for the recording. The trap keeps an interrupted stream
+    # from leaving its sleep child behind.
+    sleep 3600 &
+    child=$!
+    trap 'kill "$child" 2>/dev/null; exit 0' TERM INT
+    wait
+    ;;
+  *)
+    # The demo is tolerant of commands this fake does not model.
+    exit 0
+    ;;
+esac

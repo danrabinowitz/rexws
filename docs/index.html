@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>rexws — worktrees, Rex sessions, and agents in one list</title>
+  <meta name="description" content="A local-first Git worktree workspace manager for Rex. One list of every worktree in your registered projects, its Rex session, and the agent that needs you. Unofficial companion to Rex.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#FFFFFF">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1E1E1E">
+  <meta property="og:title" content="rexws — worktrees, Rex sessions, and agents in one list">
+  <meta property="og:description" content="A local-first Git worktree workspace manager for Rex. One list of every worktree in your registered projects, its Rex session, and the agent that needs you. Unofficial companion to Rex.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%231E1E1E'/%3E%3Ctext x='8' y='12' font-family='monospace' font-size='10' fill='%237AA2F7' text-anchor='middle'%3ER%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="assets/style.css">
+  <noscript><style>.copy-btn { display: none; }</style></noscript>
+</head>
+<body id="top">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="#top" aria-label="rexws home">REXWS</a>
+      <p class="header-meta mono">[ worktrees · rex sessions · agents ]</p>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="#install">Install</a>
+        <a href="#mental-model">Mental model</a>
+        <a href="#core-loop">Core loop</a>
+        <a class="nav-github" href="https://github.com/danrabinowitz/rexws">GitHub <span aria-hidden="true">↗</span></a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="wrap">
+    <section class="hero" aria-labelledby="hero-title">
+      <p class="eyebrow mono"><span class="section-mark" aria-hidden="true">▌</span> LOCAL-FIRST · ONE BINARY · NO DAEMON</p>
+      <h1 id="hero-title">Every worktree, its Rex session, and the agent that needs you.</h1>
+      <p class="lede">rexws is a local-first CLI and TUI for the repositories you register. It maps each Git worktree to a named Rex session, joins in live agent state, and keeps your own workflow status. It derives the mapping from Git on every run and stores only what Git and Rex do not own.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="#install"><span class="bracket" aria-hidden="true">[ </span>Install<span class="bracket" aria-hidden="true"> ]</span></a>
+        <a class="btn btn-secondary" href="https://github.com/danrabinowitz/rexws"><span class="bracket" aria-hidden="true">[ </span>GitHub <span aria-hidden="true">↗</span><span class="bracket" aria-hidden="true"> ]</span></a>
+      </div>
+      <p class="status mono">pre-1.0 · macOS tested · Git 2.36+ · no telemetry</p>
+      <p class="disclaimer" role="note"><span class="disclaimer-mark" aria-hidden="true">!</span> rexws is an unofficial personal companion to Rex. It is not affiliated with, endorsed by, or supported by Rex or Superlogical.</p>
+    </section>
+
+    <section class="hero-figure" aria-labelledby="dashboard-label">
+      <p class="figure-label mono" id="dashboard-label">[ 80×24 · dashboard ]</p>
+      <figure class="shot hero-shot">
+        <div class="shot-frame">
+          <p class="swipe-hint mono" aria-hidden="true">[ 80×24 · swipe → ]</p>
+          <div class="shot-viewport">
+            <div class="shot-scroll" tabindex="0" role="region" aria-label="Dashboard screenshot, 80 by 24 terminal; scroll horizontally to pan">
+              <img src="assets/tui.png" width="936" height="540" alt="rexws dashboard at 80×24. Six worktrees are grouped as In Progress, In Review, Ready, and Done. feat/auth is expanded to its agent and tests windows; badges read blocked (permission) ×2 and working; the header reads 6 workstreams, 3 live, 1 agent-blocked." fetchpriority="high" decoding="async">
+            </div>
+          </div>
+        </div>
+        <figcaption>Six worktrees, three live Rex sessions, one blocked agent. <code>feat/auth</code> is expanded to its Rex windows.</figcaption>
+      </figure>
+    </section>
+
+    <section id="problem" aria-labelledby="problem-title">
+      <h2 id="problem-title"><span class="section-mark" aria-hidden="true">▌</span> THE PROBLEM</h2>
+      <p>Rex knows sessions, windows, blocks, and program status. Git knows worktrees and branches. Neither knows which branch is the task you are on, which tab is running the agent you care about, or which branch is finished but unmerged. That index lives in your head, and it drifts.</p>
+      <p>rexws derives the session label from the worktree — <code>&lt;project&gt;/&lt;branch&gt;</code> — joins it with Rex's live session and agent state, and adds only the workflow metadata that belongs to you.</p>
+    </section>
+
+    <section id="mental-model" aria-labelledby="mental-title">
+      <h2 id="mental-title"><span class="section-mark" aria-hidden="true">▌</span> MENTAL MODEL</h2>
+      <p>One worktree is one workstream. A workstream is rexws's row, not a Rex object or an Orca object. It points at the Rex session with the same label and carries your status and note.</p>
+      <div class="model-grid">
+        <pre class="tree" tabindex="0" role="region" aria-label="Workstream hierarchy"><code>Project (registered repo)
+└── Worktree (Git)
+    └── Workstream (rexws row)
+        ├── Status + note          ← rexws
+        └── Rex session (1:1 by convention)
+            ├── Window (tab)
+            └── Agent (pane reporting status)</code></pre>
+        <dl class="sources">
+          <div>
+            <dt>GIT</dt>
+            <dd>Owns worktrees and branches.</dd>
+          </div>
+          <div>
+            <dt>REX</dt>
+            <dd>Owns sessions, windows, blocks, and program status.</dd>
+          </div>
+          <div>
+            <dt>REXWS</dt>
+            <dd>Owns registered projects, provider templates, status, and note.</dd>
+          </div>
+        </dl>
+      </div>
+      <p class="note">No database, index, or cache. Every command recomputes the view. Status is your workflow stage, not Rex's agent state; a Ready workstream can have a blocked agent. The defaults are In Progress, Blocked, In Review, Ready, and Done; rename, reorder, or recolor them in config.json.</p>
+    </section>
+
+    <section id="core-loop" aria-labelledby="loop-title">
+      <h2 id="loop-title"><span class="section-mark" aria-hidden="true">▌</span> THE CORE LOOP (4)</h2>
+      <p>Four keys cover the loop, at the 60×18 minimum and at 200 columns.</p>
+      <ul class="keys">
+        <li>
+          <span class="keycap"><span class="bracket">[</span>l<span class="bracket">]</span> <span class="bracket">/</span> <span class="bracket">[</span>→<span class="bracket">]</span></span>
+          <span class="key-term">Expand</span>
+          <span class="key-desc">Reveal a workstream's Rex windows. The active window carries <code>*</code>.</span>
+        </li>
+        <li>
+          <span class="keycap"><span class="bracket">[</span>Enter<span class="bracket">]</span></span>
+          <span class="key-term">Switch</span>
+          <span class="key-desc">Focus the session or the selected window. A stopped workstream opens its session.</span>
+        </li>
+        <li>
+          <span class="keycap"><span class="bracket">[</span>n<span class="bracket">]</span></span>
+          <span class="key-term">New worktree</span>
+          <span class="key-desc">Run the project's provider, then verify exactly one worktree exists for the branch.</span>
+        </li>
+        <li>
+          <span class="keycap"><span class="bracket">[</span>c<span class="bracket">]</span></span>
+          <span class="key-term">Cleanup</span>
+          <span class="key-desc">Preview every worktree and branch by risk. Safe items are opt-in; dirty and unmerged items need <code>f</code>. Nothing applies until you confirm.</span>
+        </li>
+      </ul>
+      <figure class="shot demo-shot">
+        <div class="demo-motion">
+          <div class="shot-viewport">
+            <div class="shot-scroll">
+              <img src="assets/demo.gif" width="936" height="540" loading="lazy" decoding="async" alt="15-second rexws demo: expand feat/auth to its Rex windows, move to main and switch it to a live Rex session, open the new-worktree form for feat/search, and preview cleanup with two safe items, one needs-review item, and four blocked items.">
+            </div>
+          </div>
+        </div>
+        <div class="demo-still">
+          <div class="shot-scroll" tabindex="0" role="region" aria-label="Demo still, 80 by 24 terminal; scroll horizontally to pan">
+            <img src="assets/tui.png" width="936" height="540" loading="lazy" decoding="async" alt="rexws dashboard at 80×24. Six worktrees are grouped as In Progress, In Review, Ready, and Done. feat/auth is expanded to its agent and tests windows; badges read blocked (permission) ×2 and working; the header reads 6 workstreams, 3 live, 1 agent-blocked.">
+          </div>
+          <a class="demo-play" href="assets/demo.gif">[ Play the 15-second demo ]</a>
+        </div>
+        <figcaption>15 seconds. Expand, switch a stopped worktree to a live session, open the new-worktree form, and preview cleanup. Recorded against a scratch repository and a fake Rex; no live sessions or worktrees were touched.</figcaption>
+      </figure>
+    </section>
+
+    <section id="install" class="install" aria-labelledby="install-title">
+      <div class="install-copy">
+        <h2 id="install-title"><span class="section-mark" aria-hidden="true">▌</span> INSTALL</h2>
+        <p>No tagged release yet. Build from source with Go 1.27.4 or newer:</p>
+        <div class="code-wrap">
+          <div class="code-head mono">
+            <span>[ install ]</span>
+            <button class="copy-btn" type="button" data-copy-target="install-commands">[ copy ]</button>
+          </div>
+          <pre tabindex="0" role="region" aria-label="Install commands"><code id="install-commands">git clone https://github.com/danrabinowitz/rexws.git
+cd rexws
+go build -o ~/.local/bin/rexws ./cmd/rexws
+
+rexws project add ~/code/acme/repo \
+  --worktree-root ~/code/worktrees/repo
+rexws new acme feat/auth --switch
+rexws</code></pre>
+        </div>
+        <p class="sr-only" aria-live="polite" id="copy-status"></p>
+        <p>Run <code>rexws</code> with no arguments for the TUI, or <code>rexws tui</code>.</p>
+        <p>Git 2.36+ (<code>git worktree list --porcelain -z</code>). <code>cleanup</code>'s patch-equivalence proof needs Git 2.38+ (<code>git merge-tree --write-tree</code>). macOS is the tested platform; other platforms are untested.</p>
+        <p>Verified against Rex <code>0.1.0-preview.25</code> (API revision 24). There is no Rex version check; preview drift can break the adapter.</p>
+        <p><a href="https://github.com/danrabinowitz/rexws/blob/main/README.md">README: CLI, selectors, config, and the JSON contract.</a></p>
+      </div>
+      <aside class="scope" aria-labelledby="scope-title">
+        <h2 id="scope-title"><span class="section-mark" aria-hidden="true">▌</span> WHAT IT IS NOT (4)</h2>
+        <ul>
+          <li>Not a Rex replacement or terminal multiplexer. Rex owns sessions, windows, and panes.</li>
+          <li>Not a Git GUI. No merge, rebase, commit, review, or push workflow.</li>
+          <li>No daemon, cloud, sync, telemetry, or team model. It talks to your local Rex CLI and nothing else.</li>
+          <li>No mouse, Kanban, or configurable keybindings. One worktree maps to one session by convention.</li>
+        </ul>
+      </aside>
+    </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p class="footer-meta mono">REXWS · MIT · pre-1.0</p>
+      <nav aria-label="Footer">
+        <a href="https://github.com/danrabinowitz/rexws">GitHub</a> ·
+        <a href="https://github.com/danrabinowitz/rexws/blob/main/README.md">README</a> ·
+        <a href="https://github.com/danrabinowitz/rexws/blob/main/TUI-UX.md">TUI UX</a> ·
+        <a href="https://github.com/danrabinowitz/rexws/blob/main/TUI-DESIGN.md">TUI design</a> ·
+        <a href="https://github.com/danrabinowitz/rexws/blob/main/LICENSE">License</a>
+      </nav>
+      <p class="disclaimer footer-disclaimer" role="note"><span class="disclaimer-mark" aria-hidden="true">!</span> rexws is an unofficial personal companion to Rex. It is not affiliated with, endorsed by, or supported by Rex or Superlogical.</p>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var demo = document.querySelector('.demo-shot');
+      var gif = demo && demo.querySelector('.demo-motion img');
+      if (demo && gif) {
+        var showStill = function () { demo.classList.add('demo-fallback'); };
+        gif.addEventListener('error', showStill);
+        if (gif.complete && gif.naturalWidth === 0) showStill();
+      }
+
+      var button = document.querySelector('.copy-btn');
+      if (!button) return;
+      var target = document.getElementById(button.getAttribute('data-copy-target'));
+      var status = document.getElementById('copy-status');
+      if (!target || !status) return;
+      var label = button.textContent;
+      var timer;
+      function reset() {
+        button.textContent = label;
+        button.classList.remove('is-copied');
+        status.textContent = '';
+      }
+      function announce(text) {
+        status.textContent = text;
+        clearTimeout(timer);
+        timer = setTimeout(reset, 2000);
+      }
+      button.addEventListener('click', function () {
+        var text = target.innerText;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () {
+            button.textContent = '[ copied ]';
+            button.classList.add('is-copied');
+            announce('Commands copied to the clipboard.');
+          }, fallback);
+          return;
+        }
+        fallback();
+        function fallback() {
+          var range = document.createRange();
+          range.selectNodeContents(target);
+          var selection = window.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          announce('Select the commands and copy.');
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
