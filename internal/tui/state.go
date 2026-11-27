@@ -623,13 +623,24 @@ func (s State) addWarning(text string) State {
 
 // setPersistentWarnings replaces load-time warnings, keeping transient errors.
 // Persistent warnings do not expire; a later load that does not report one
-// removes it.
+// removes it. A transient copy of a condition that now persists is dropped so
+// the banner does not show it twice.
 func (s State) setPersistentWarnings(warnings []persistentWarning) State {
+	upgraded := make(map[string]bool, len(warnings))
+	for _, warning := range warnings {
+		if warning.text != "" {
+			upgraded[warning.text] = true
+		}
+	}
 	kept := make([]notice, 0, len(s.notices)+len(warnings))
 	for _, n := range s.notices {
-		if !n.persistent {
-			kept = append(kept, n)
+		if n.persistent {
+			continue
 		}
+		if n.warning && upgraded[n.text] {
+			continue
+		}
+		kept = append(kept, n)
 	}
 	for _, warning := range warnings {
 		if warning.text == "" {
@@ -646,6 +657,18 @@ func (s State) setPersistentWarnings(warnings []persistentWarning) State {
 	}
 	s.notices = kept
 	return s
+}
+
+// hasPersistentWarning reports whether an active load-time warning already
+// says text. Mutations use it to avoid duplicating a condition the next load
+// will report persistently.
+func (s State) hasPersistentWarning(text string, now time.Time) bool {
+	for _, n := range s.persistentNotices(now) {
+		if n.text == "! "+text {
+			return true
+		}
+	}
+	return false
 }
 
 func (s State) pruneNotices(now time.Time) State {

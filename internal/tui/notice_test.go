@@ -53,6 +53,27 @@ func TestWarningNoticeRanking(t *testing.T) {
 	}
 }
 
+func TestPersistentWarningPrunesTransientCopy(t *testing.T) {
+	const text = "project alpha: worktree /x is unreadable and was skipped"
+	s := newState()
+	s = s.addWarning(text)
+	s = s.setPersistentWarnings([]persistentWarning{{text: text, class: warningDiscovery}})
+
+	count := 0
+	for _, n := range s.notices {
+		if !strings.Contains(n.text, text) {
+			continue
+		}
+		count++
+		if !n.persistent {
+			t.Errorf("transient copy survived promotion: %#v", n)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("notices mentioning the warning = %d, want 1", count)
+	}
+}
+
 func TestRetainedBranchNotice(t *testing.T) {
 	cases := []struct {
 		name   string

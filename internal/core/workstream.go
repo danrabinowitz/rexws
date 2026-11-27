@@ -146,8 +146,9 @@ type Session struct {
 // Build joins worktree discovery with state.json and Rex sessions. cfg
 // supplies the default status and the display labels, so every frontend gets
 // the same labels without resolving them again. A worktree whose path cannot
-// be canonicalized is skipped; Build drops its warning, while
-// BuildWithWarnings returns it for callers that can display it.
+// be canonicalized is skipped. Build drops that warning and is kept for
+// callers that cannot display it; BuildWithWarnings returns it for callers
+// that can.
 func Build(inputs []Input, state config.State, sessions []Session, cfg config.Config) ([]Workstream, error) {
 	workstreams, _ := BuildWithWarnings(inputs, state, sessions, cfg)
 	return workstreams, nil

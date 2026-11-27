@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/danrabinowitz/rexws/internal/config"
 	"github.com/danrabinowitz/rexws/internal/core"
+	"github.com/danrabinowitz/rexws/internal/git"
 	"github.com/danrabinowitz/rexws/internal/ops"
 	"github.com/danrabinowitz/rexws/internal/rex"
 )
@@ -101,6 +104,203 @@ func TestConfigWarningRanksBelowSession(t *testing.T) {
 	shown, _, ok := m.state.bannerNotice(time.Now())
 	if !ok || !strings.Contains(shown.text, "session problem") {
 		t.Errorf("banner = %#v, %v; want the session warning first", shown, ok)
+	}
+}
+
+// brokenWorktreePath returns a path git could list but Canonical cannot
+// resolve: a symlink whose target is missing.
+func brokenWorktreePath(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	broken := filepath.Join(dir, "broken")
+	if err := os.Symlink(filepath.Join(dir, "missing"), broken); err != nil {
+		t.Fatalf("create broken symlink: %v", err)
+	}
+	return broken
+}
+
+func TestBuildWorkstreamsSurfacesSkippedWorktree(t *testing.T) {
+	readable := t.TempDir()
+	missing := brokenWorktreePath(t)
+	inputs := []core.Input{{
+		Project: config.Project{Name: "alpha", Path: "/code/alpha"},
+		Worktrees: []git.Worktree{
+			{Path: missing, Branch: "feature"},
+			{Path: missing, Branch: "feature"},
+			{Path: readable, Branch: "main"},
+		},
+	}}
+	discoveryErrors := []ops.ProjectError{{Project: "beta", Err: errors.New("not a git repository")}}
+
+	workstreams, warnings := buildWorkstreams(inputs, config.NewState(), nil, config.Default(), discoveryErrors)
+
+	if len(workstreams) != 1 || workstreams[0].Branch != "main" {
+		t.Fatalf("readable worktree was not kept: %#v", workstreams)
+	}
+	if len(warnings) != 2 {
+		t.Fatalf("warnings = %#v, want one deduplicated skipped-worktree warning and the discovery warning", warnings)
+	}
+	for _, want := range []string{"project alpha", missing, "feature", "skipped"} {
+		if !strings.Contains(warnings[0], want) {
+			t.Errorf("skipped-worktree warning %q missing %q", warnings[0], want)
+		}
+	}
+	// The whole-project failure is appended last, so it outranks the single
+	// skipped worktree within the warningDiscovery class.
+	if warnings[1] != "project beta: not a git repository" {
+		t.Errorf("discovery warning = %q", warnings[1])
+	}
+}
+
+func TestBuildWorkstreamsSilentWhenAllReadable(t *testing.T) {
+	inputs := []core.Input{{
+		Project:   config.Project{Name: "alpha", Path: "/code/alpha"},
+		Worktrees: []git.Worktree{{Path: t.TempDir(), Branch: "main"}},
+	}}
+
+	workstreams, warnings := buildWorkstreams(inputs, config.NewState(), nil, config.Default(), nil)
+
+	if len(workstreams) != 1 {
+		t.Fatalf("workstreams = %#v", workstreams)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none when every candidate is readable", warnings)
+	}
+}
+
+func TestLoadCmdSurfacesSkippedWorktree(t *testing.T) {
+	configDir := t.TempDir()
+	configJSON := `{"projects":[{"name":"alpha","path":"/code/alpha"}]}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.EnvDir, configDir)
+	// A Rex that reports no sessions and whose event stream emits one
+	// connected event.
+	rexBin := filepath.Join(t.TempDir(), "rex")
+	rexScript := `#!/bin/sh
+case "$*" in
+  "session ls --json") printf '%s\n' '{"sessions":[]}' ;;
+  "events --json") printf '%s\n' '{"type":"server_connected","payload":{}}' ;;
+  *) exit 0 ;;
+esac
+`
+	if err := os.WriteFile(rexBin, []byte(rexScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.EnvRexBin, rexBin)
+
+	readable := t.TempDir()
+	missing := brokenWorktreePath(t)
+	previous := discoverProjects
+	discoverProjects = func(context.Context, config.Config) ops.Discovery {
+		return ops.Discovery{Inputs: []core.Input{{
+			Project: config.Project{Name: "alpha", Path: "/code/alpha"},
+			Worktrees: []git.Worktree{
+				{Path: readable, Branch: "main"},
+				{Path: missing, Branch: "feature"},
+			},
+		}}}
+	}
+	defer func() { discoverProjects = previous }()
+
+	msg, ok := loadCmd(context.Background())().(loadedMsg)
+	if !ok {
+		t.Fatal("loadCmd did not return a loadedMsg")
+	}
+	if msg.fatalErr != nil || msg.loadErr != nil {
+		t.Fatalf("load failed: fatal=%v load=%v", msg.fatalErr, msg.loadErr)
+	}
+
+	m := NewModel()
+	defer m.Close()
+	m.state = newState()
+	_, _ = m.handleLoaded(msg)
+
+	var persistent []notice
+	for _, notice := range m.state.persistentNotices(time.Now()) {
+		if strings.Contains(notice.text, missing) {
+			persistent = append(persistent, notice)
+		}
+	}
+	if len(persistent) != 1 {
+		t.Fatalf("persistent skipped-worktree warnings = %#v", persistent)
+	}
+	if persistent[0].priority != warningDiscovery {
+		t.Errorf("skipped-worktree priority = %d, want %d", persistent[0].priority, warningDiscovery)
+	}
+	shown, _, ok := m.state.bannerNotice(time.Now())
+	if !ok || !strings.Contains(shown.text, "feature") {
+		t.Errorf("banner = %#v, %v; want the skipped worktree named", shown, ok)
+	}
+	if len(m.state.workstreams) != 1 || m.state.workstreams[0].Branch != "main" {
+		t.Errorf("readable workstreams were dropped: %#v", m.state.workstreams)
+	}
+}
+
+func TestStatusDoneSurfacesSkippedWarnings(t *testing.T) {
+	m := NewModel()
+	m.state = testState(t)
+	m.state.pending = true
+	skipped := core.SkippedWorktree{
+		Project: config.Project{Name: "alpha"},
+		Path:    "/code/alpha/stale",
+		Branch:  "feature",
+		Err:     errors.New("gone"),
+	}
+	_, _ = m.handleStatusDone(statusDoneMsg{
+		request:  StatusRequest{Path: "/wt/dosido", Status: config.StatusBlocked},
+		warnings: []string{skipped.Warning()},
+	})
+
+	for _, notice := range m.state.visibleNotices(time.Now()) {
+		if strings.Contains(notice.text, skipped.Warning()) {
+			return
+		}
+	}
+	t.Fatalf("status warning was dropped: %#v", m.state.notices)
+}
+
+func TestStatusDoneDoesNotDuplicatePersistentSkippedWarning(t *testing.T) {
+	fakeRexEvents(t, `{"type":"server_connected","payload":{}}`, `{"type":"server_connected","payload":{}}`)
+	m := NewModel()
+	defer m.Close()
+	m.state = testState(t)
+	skipped := core.SkippedWorktree{
+		Project: config.Project{Name: "alpha"},
+		Path:    "/code/alpha/stale",
+		Branch:  "feature",
+		Err:     errors.New("gone"),
+	}
+
+	_, _ = m.handleLoaded(loadedMsg{
+		cfg:               config.Default(),
+		workstreams:       sampleWorkstreams(),
+		rexAvailable:      true,
+		discoveryWarnings: []string{skipped.Warning()},
+	})
+	before := len(m.state.notices)
+
+	_, _ = m.handleStatusDone(statusDoneMsg{
+		request:  StatusRequest{Path: "/wt/dosido", Status: config.StatusBlocked},
+		warnings: []string{skipped.Warning()},
+	})
+
+	count := 0
+	for _, notice := range m.state.notices {
+		if !strings.Contains(notice.text, skipped.Warning()) {
+			continue
+		}
+		count++
+		if !notice.persistent {
+			t.Errorf("duplicate transient notice for a persistent warning: %#v", notice)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("notices mentioning the skipped worktree = %d, want 1", count)
+	}
+	if len(m.state.notices) != before {
+		t.Errorf("status added a duplicate notice: %#v", m.state.notices)
 	}
 }
 

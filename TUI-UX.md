@@ -771,6 +771,10 @@ If Rex becomes unavailable after data was loaded:
 - **Per-project discovery error:** use `ops.Discover`'s per-project results. Skip
   the failed project, keep the rest usable, and show a persistent warning
   `! project <name>: <reason>`. `r` retries.
+- **Skipped worktree:** `core.BuildWithWarnings` reports a worktree whose path
+  cannot be canonicalized. Keep the readable worktrees and show a persistent
+  warning `! project <name>: worktree <path> (<branch>) is unreadable and was
+  skipped: <reason>`. `r` retries.
 - **Rex unavailable at startup:** render workstreams with `?` agent badges and no
   windows; header token `Rex unavailable (r)`; disable create/select and remove;
   `r` retries.

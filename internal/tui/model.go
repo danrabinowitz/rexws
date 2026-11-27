@@ -236,6 +236,26 @@ type loadedMsg struct {
 	loadErr           error
 }
 
+// discoverProjects is ops.Discover. It is a variable so tests can supply a
+// deterministic worktree list without a real repository.
+var discoverProjects = ops.Discover
+
+// buildWorkstreams builds the dashboard rows with core.BuildWithWarnings and
+// folds skipped-worktree warnings into the per-project discovery warning
+// channel, so an uncanonicalizable worktree is named instead of vanishing.
+// Build warnings come first: a project that cannot be read at all hides every
+// worktree in it, so its discovery error keeps the banner slot over a single
+// skipped worktree. Duplicate texts are dropped so one condition is reported
+// once.
+func buildWorkstreams(inputs []core.Input, state config.State, sessions []core.Session, cfg config.Config, discoveryErrors []ops.ProjectError) ([]core.Workstream, []string) {
+	workstreams, buildWarnings := core.BuildWithWarnings(inputs, state, sessions, cfg)
+	discoveryWarnings := make([]string, 0, len(discoveryErrors))
+	for _, projectErr := range discoveryErrors {
+		discoveryWarnings = append(discoveryWarnings, projectErr.Error())
+	}
+	return workstreams, mergeStrings(buildWarnings, discoveryWarnings)
+}
+
 func loadCmd(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
 		cfg, err := config.Load()
@@ -246,23 +266,14 @@ func loadCmd(ctx context.Context) tea.Cmd {
 		if err != nil {
 			return loadedMsg{cfg: cfg, fatalKind: "state", fatalErr: err}
 		}
-		discovery := ops.Discover(ctx, cfg)
+		discovery := discoverProjects(ctx, cfg)
 		rexState := ops.ReadRex(ctx, cfg)
 
-		var workstreams []core.Workstream
-		if rexState.Err == nil {
-			workstreams, err = core.Build(discovery.Inputs, state, rexState.Sessions, cfg)
-		} else {
-			workstreams, err = core.Build(discovery.Inputs, state, nil, cfg)
-		}
-		discoveryWarnings := make([]string, 0, len(discovery.Errors))
-		for _, projectErr := range discovery.Errors {
-			discoveryWarnings = append(discoveryWarnings, projectErr.Error())
-		}
 		var sessions []core.Session
 		if rexState.Err == nil {
 			sessions = rexState.Sessions
 		}
+		workstreams, discoveryWarnings := buildWorkstreams(discovery.Inputs, state, sessions, cfg, discovery.Errors)
 		return loadedMsg{
 			cfg:               cfg,
 			workstreams:       workstreams,
@@ -527,14 +538,15 @@ func (m *Model) handleSwitchDone(msg switchDoneMsg) (*Model, tea.Cmd) {
 
 // statusDoneMsg reports a status change.
 type statusDoneMsg struct {
-	request StatusRequest
-	err     error
+	request  StatusRequest
+	warnings []string
+	err      error
 }
 
 func statusCmd(ctx context.Context, cfg config.Config, request StatusRequest) tea.Cmd {
 	return func() tea.Msg {
-		_, err := ops.SetStatus(ctx, cfg, request.Path, request.Status)
-		return statusDoneMsg{request: request, err: err}
+		_, warnings, err := ops.SetStatusWithWarnings(ctx, cfg, request.Path, request.Status)
+		return statusDoneMsg{request: request, warnings: warnings, err: err}
 	}
 }
 
@@ -547,6 +559,15 @@ func (m *Model) handleStatusDone(msg statusDoneMsg) (*Model, tea.Cmd) {
 	} else {
 		// Follow the workstream even if it moved to another status group.
 		m.state.cursorKey = RowKey{Kind: RowWorkstream, ID: msg.request.Path}
+	}
+	// A skipped worktree warning that explains this request is already shown
+	// persistently by the last load; only new conditions become a notice. The
+	// refresh below will report them persistently either way.
+	now := m.now()
+	for _, warning := range msg.warnings {
+		if !m.state.hasPersistentWarning(warning, now) {
+			m.state = m.state.addWarning(warning)
+		}
 	}
 	m.state = m.state.rebuild()
 	cmds = append(cmds, m.refreshNow())
