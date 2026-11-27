@@ -12,7 +12,7 @@ your own workflow metadata, and stays out of the way.
 
 <a href="docs/assets/demo.gif"><img src="docs/assets/tui.png" width="880" alt="rexws dashboard at 80×24. Six worktrees are grouped as In Progress, In Review, Ready, and Done. feat/auth is expanded to its agent and tests windows; badges read blocked (permission) ×2 and working; the header reads 6 workstreams, 3 live, 1 agent-blocked."></a>
 
-<sub><b>80×24</b> · six worktrees · three live Rex sessions · one blocked agent. <code>feat/auth</code> is expanded to its Rex windows. <a href="docs/assets/demo.gif">Demo GIF, 16s</a> · <a href="https://danrabinowitz.github.io/rexws/">Website</a></sub>
+<sub><b>80×24</b> · six worktrees · three live Rex sessions · one blocked agent. <code>feat/auth</code> is expanded to its Rex windows. <a href="docs/assets/demo.gif">Demo GIF, 16s</a> · <a href="docs/assets/demo.mp4">MP4, 16s</a> · <a href="https://rexws.danrabinowitz.com/">Website</a></sub>
 
 **Status:** pre-1.0, active development. The CLI and the interactive TUI both
 work; CI runs on every push to `main` and on pull requests, and there is no
